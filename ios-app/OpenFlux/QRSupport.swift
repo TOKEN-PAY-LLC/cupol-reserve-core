@@ -129,7 +129,11 @@ struct ShareQRView: View {
     var body: some View {
         NavigationView {
             VStack(spacing: 20) {
-                if let s = makeOFLUXString(profile), let img = makeQRImage(s) {
+                // Сначала общий стандарт openflux://v1 — его понимают CLI и
+                // Android. OFLUX1 остаётся запасным, чтобы старые сборки iOS
+                // всё ещё могли считать наш QR.
+                if let s = ShareLink.encode(profile: profile) ?? makeOFLUXString(profile),
+                   let img = makeQRImage(s) {
                     Text(profile.name).font(.headline)
                     Image(uiImage: img)
                         .interpolation(.none)

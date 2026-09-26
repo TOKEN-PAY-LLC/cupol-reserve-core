@@ -267,11 +267,13 @@ func wrapEncryption(inner transport.Transport, transportType, docURL string) (tr
 	if secret == "" {
 		return inner, nil
 	}
-	// Та же развилка, что в CLI: у direct контекстом служит имя транспорта,
-	// потому что адрес прослушивания на узле и адрес набора у клиента — разные
-	// строки, и ключи бы разъехались.
-	context := transportType
-	if docURL != "" && transportType != "direct" {
+	// Правило то же, что в CLI и у клиента OpenFlux-Android: --url, если он
+	// задан и не плейсхолдер, иначе сам плейсхолдер. Для direct URL профиля —
+	// это адрес узла, а он у сторон разный (узел слушает 0.0.0.0, клиент
+	// набирает публичный IP), поэтому он в контекст не идёт и остаётся
+	// плейсхолдер — ровно как у них.
+	context := contextPlaceholder
+	if transportType != "direct" && docURL != "" && docURL != contextPlaceholder {
 		context = docURL
 	}
 	enc, err := transport.NewEncryptedTransport(inner, secret, context, false)

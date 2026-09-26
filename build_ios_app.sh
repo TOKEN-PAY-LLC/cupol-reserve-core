@@ -23,12 +23,30 @@ echo "==> [3/5] Generating Xcode project"
 cd "$APP_DIR"
 xcodegen generate
 
+# App Store Connect API key, if present. Without it xcodebuild needs an Apple ID
+# signed into Xcode's Accounts, and signing here is cloud-managed: no account
+# means no distribution identity and the export dies with "No Accounts". The key
+# is the CI-sanctioned way in and keeps the pipeline working headless.
+# Key id comes from the file name; the issuer from $ASC_ISSUER_ID or
+# ~/.appstoreconnect/issuer_id. Neither is a secret — the .p8 is, and it stays
+# outside the repo.
+ASC_ARGS=()
+ASC_KEY=$(ls "$HOME"/.appstoreconnect/private_keys/AuthKey_*.p8 2>/dev/null | head -1)
+ASC_ISSUER="${ASC_ISSUER_ID:-$(cat "$HOME/.appstoreconnect/issuer_id" 2>/dev/null)}"
+if [ -n "$ASC_KEY" ] && [ -n "$ASC_ISSUER" ]; then
+  ASC_KEY_ID=$(basename "$ASC_KEY" .p8); ASC_KEY_ID=${ASC_KEY_ID#AuthKey_}
+  ASC_ARGS=(-authenticationKeyPath "$ASC_KEY" \
+            -authenticationKeyID "$ASC_KEY_ID" \
+            -authenticationKeyIssuerID "$ASC_ISSUER")
+  echo "    (signing via App Store Connect key $ASC_KEY_ID)"
+fi
+
 echo "==> [4/5] Archiving (Release)"
 rm -rf build/OpenFlux.xcarchive
 xcodebuild -project OpenFlux.xcodeproj -scheme OpenFlux -configuration Release \
   -destination 'generic/platform=iOS' \
   -archivePath build/OpenFlux.xcarchive \
-  -allowProvisioningUpdates \
+  -allowProvisioningUpdates "${ASC_ARGS[@]}" \
   clean archive
 
 echo "==> [5/5] Exporting App Store IPA"
@@ -37,7 +55,7 @@ xcodebuild -exportArchive \
   -archivePath build/OpenFlux.xcarchive \
   -exportPath build/export \
   -exportOptionsPlist ExportOptions.plist \
-  -allowProvisioningUpdates
+  -allowProvisioningUpdates "${ASC_ARGS[@]}"
 
 echo ""
 echo "IPA ready: $APP_DIR/build/export/OpenFlux.ipa"

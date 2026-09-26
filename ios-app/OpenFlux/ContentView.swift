@@ -276,7 +276,11 @@ struct ContentView: View {
                               port: Int(socksPort) ?? 10808)
             }
             .sheet(item: $editorTask) { task in
-                ProfileEditorView(profile: task.profile) { saved in
+                ProfileEditorView(profile: task.profile,
+                                  onImportMany: { imported in
+                                      ShareImporter.apply(imported, to: store)
+                                      testHint = "Из ссылки заведено профилей: \(imported.profiles.count)."
+                                  }) { saved in
                     store.upsert(saved)
                 }
             }
@@ -674,6 +678,9 @@ struct ContentView: View {
 
 struct ProfileEditorView: View {
     let profile: Profile?
+    /// Ссылка может нести несколько носителей — тогда из неё выходит НЕСКОЛЬКО
+    /// профилей, и одного onSave уже мало.
+    var onImportMany: ((ShareImporter.Imported) -> Void)? = nil
     let onSave: (Profile) -> Void
     @Environment(\.dismiss) private var dismiss
 
@@ -770,7 +777,7 @@ struct ProfileEditorView: View {
                     } label: {
                         Label("Сканировать QR-код", systemImage: "qrcode.viewfinder")
                     }
-                    Text("Подойдёт обычная ссылка на документ (disk.yandex.ru / boards.yandex.ru / cloud.mail.ru) или конфиг OFLUX1.")
+                    Text("Подойдёт ссылка openflux://v1 (общий стандарт с CLI и Android), обычная ссылка на документ (disk.yandex.ru / boards.yandex.ru / cloud.mail.ru) или старый конфиг OFLUX1.")
                         .font(.caption2).foregroundColor(.secondary)
                     if let m = importMsg {
                         Text(m).font(.caption2).foregroundColor(.secondary)
@@ -842,6 +849,23 @@ struct ProfileEditorView: View {
     @discardableResult
     private func ingest(_ raw: String) -> Bool {
         let s = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        if ShareLink.looksLikeLink(s) {
+            let (cfg, err) = ShareLink.decode(s)
+            if let cfg = cfg {
+                // Несколько носителей — это несколько профилей; в одну форму
+                // они не помещаются, поэтому заводим их сразу и закрываемся.
+                let imported = ShareImporter.build(from: cfg)
+                if imported.profiles.count > 1, let many = onImportMany {
+                    many(imported)
+                    dismiss()
+                    return true
+                }
+                applyShareConfig(cfg)
+                return true
+            }
+            importMsg = "Ссылка не принята: \(err ?? "неизвестная ошибка")"
+            return false
+        }
         if applyParsed(parseOFLUX(s)) { return true }
         guard s.lowercased().hasPrefix("http") else { return false }
         if s.lowercased().contains("cloud.mail.ru") {
@@ -856,6 +880,36 @@ struct ProfileEditorView: View {
         }
         if name.trimmingCharacters(in: .whitespaces).isEmpty { name = transport.title }
         return true
+    }
+
+    /// Раскладывает конфигурацию из openflux://-ссылки по полям редактора.
+    ///
+    /// Стандарт умеет больше, чем наша модель: несколько носителей с
+    /// приоритетами и согласованную сессию. Мы берём самый приоритетный
+    /// поддерживаемый носитель как основной, а идущий рядом `direct`
+    /// раскладываем в поля прямого канала — он у нас и нужен ровно для этого.
+    private func applyShareConfig(_ cfg: ShareConfig) {
+        if let kind = cfg.primaryKind {
+            transportRaw = kind.rawValue
+        }
+        if let p = cfg.primary {
+            let value = (p.type == "direct" ? p.dial : p.url) ?? ""
+            switch transport {
+            case .yandex: url1 = value
+            case .volga, .boards, .mail, .direct: single = value
+            case .max: break
+            }
+        }
+        if let s = cfg.secret, !s.isEmpty {
+            if transport == .direct { encryptionKey = s } else { directKey = s }
+        }
+        if let d = cfg.directDial, transport != .direct {
+            nodeAddr = d
+        }
+        if name.trimmingCharacters(in: .whitespaces).isEmpty {
+            name = cfg.name ?? transport.title
+        }
+        importMsg = "Принята ссылка openflux://v1"
     }
 
     /// Fill the editor fields from a parsed OFLUX config. Returns false if nil.

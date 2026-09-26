@@ -85,8 +85,8 @@ var ErrLoginRequired = errors.New("yandex docs: login required")
 type YandexDocsTransport struct {
 	*transport.BaseTransport
 
-	url      string
-	session  *DocSession
+	url     string
+	session *DocSession
 
 	userCounter atomic.Int32
 	baseUserID  string
@@ -234,6 +234,20 @@ func (t *YandexDocsTransport) Start() error {
 	t.connectToDoc(0)
 
 	return nil
+}
+
+// Stop также закрывает соединение с документом. Иначе читатель сидит в
+// ReadMessage до следующего сообщения сервера и оставляет сокет открытым —
+// участник продолжает висеть в документе уже после остановки транспорта.
+func (t *YandexDocsTransport) Stop() error {
+	err := t.BaseTransport.Stop()
+	t.Mu.RLock()
+	session := t.session
+	t.Mu.RUnlock()
+	if session != nil && session.Conn != nil {
+		_ = session.Conn.Close()
+	}
+	return err
 }
 
 func (t *YandexDocsTransport) Send(data []byte) error {

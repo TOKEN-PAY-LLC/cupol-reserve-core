@@ -80,6 +80,15 @@ func main() {
 	encryptionKeyFile := flag.String("encryption-key-file", "",
 		"Path to a file holding the shared secret for end-to-end AES-256-GCM. "+
 			"Both peers must pass the same secret; empty = no encryption.")
+	sessionContext := flag.String("session-context", "",
+		"KDF context for the encryption key. Default: --url when set, otherwise the "+
+			"placeholder \"http://#\". Both peers must derive the SAME string.")
+	shareLink := flag.Bool("share", false,
+		"Print an openflux:// link and QR for this configuration and exit. "+
+			"The link carries the encryption secret — treat it like the key file.")
+	shareHost := flag.String("share-host", "",
+		"Address clients should dial for --transport=direct in the shared link "+
+			"(the node's public host; the port is taken from --direct-addr).")
 	flag.Parse()
 
 	if *localIP != "" {
@@ -104,6 +113,11 @@ func main() {
 	log.Printf("=== Universal Bypass Tool ===")
 	log.Printf("Mode: %s", map[bool]string{true: "EXIT NODE", false: "CLIENT"}[*exitNode])
 	log.Printf("Transport: %s", *transportType)
+
+	if *shareLink {
+		emitShareLink(*transportType, globalDocUrl, *directAddr, *shareHost, *encryptionKeyFile)
+		return
+	}
 
 	config := transport.DefaultConfig()
 	var trans transport.Transport
@@ -164,17 +178,7 @@ func main() {
 		if err != nil {
 			log.Fatalf("Read encryption key file: %v", err)
 		}
-		// Контекст — публичная соль вывода ключа, но обе стороны обязаны взять
-		// ОДНУ И ТУ ЖЕ строку. Для доковых транспортов это URL документа, он у
-		// клиента и ноды одинаков. Для direct так нельзя: нода слушает
-		// 0.0.0.0:9443, а клиент набирает 64.118.154.75:9443 — строки разные, и
-		// ключи молча разъехались бы (каждый пакет не проходит аутентификацию,
-		// снаружи это выглядит как таймауты). Поэтому у direct контекст — имя
-		// транспорта, единственное, в чём стороны заведомо согласны.
-		context := *transportType
-		if globalDocUrl != "" && *transportType != "direct" {
-			context = globalDocUrl
-		}
+		context := pickSessionContext(*sessionContext, globalDocUrl)
 		encrypted, err := transport.NewEncryptedTransport(
 			trans, strings.TrimSpace(string(secretBytes)), context, *exitNode)
 		if err != nil {
