@@ -472,6 +472,16 @@ func (t *YandexDocsTransport) scheduleReconnectNoCaptcha(attempt int) {
 // participant-list messages during a failure streak). The floor here (was
 // 500ms) is raised to slow that churn down; this doesn't change steady-state
 // throughput since successful connects never hit backoff at all.
+// shortStr truncates s to n bytes for log lines - a redirect chain or
+// Location header can be arbitrarily long, and the full value is rarely
+// what a log reader needs.
+func shortStr(s string, n int) string {
+	if len(s) <= n {
+		return s
+	}
+	return s[:n]
+}
+
 func reconnectBackoff(n int) time.Duration {
 	if n < 1 {
 		n = 1
