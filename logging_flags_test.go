@@ -46,11 +46,14 @@ func TestPickSessionContext(t *testing.T) {
 		{"highest-priority transport URL", "", "http://#", specs, "https://docs/doc"},
 		{"no URL anywhere keeps the old default", "", "http://#", specs[:1], "http://#"},
 		{"legacy single transport", "", "http://#", []transportSpec{{Type: "yandex", Priority: 100, URL: "http://#"}}, "http://#"},
+		// cupsonline is script-only: a real spec for it has Type "script"
+		// (expandScriptType rewrites it) but keeps Name "cupsonline" - that's
+		// what pickSessionContext actually keys its exclusion off now.
 		{"cupsonline rooms are not a context", "", "http://#", []transportSpec{
-			{Type: "cupsonline", Priority: 100, URL: "WyIxYzE0NGQwZS1lMDQw"},
-			{Type: "yandex", Priority: 50, URL: "https://docs/doc"},
+			{Name: "cupsonline", Type: "script", Priority: 100, URL: "WyIxYzE0NGQwZS1lMDQw"},
+			{Name: "yandex", Type: "yandex", Priority: 50, URL: "https://docs/doc"},
 		}, "https://docs/doc"},
-		{"cupsonline alone", "", "http://#", []transportSpec{{Type: "cupsonline", Priority: 100, URL: "WyIxYzE0NGQwZS1lMDQw"}}, "http://#"},
+		{"cupsonline alone", "", "http://#", []transportSpec{{Name: "cupsonline", Type: "script", Priority: 100, URL: "WyIxYzE0NGQwZS1lMDQw"}}, "http://#"},
 	}
 	for _, c := range cases {
 		if got := pickSessionContext(c.explicit, c.url, c.specs); got != c.want {

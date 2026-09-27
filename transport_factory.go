@@ -6,10 +6,9 @@ import (
 
 	"openflux/transport"
 	"openflux/transport/control"
-	"openflux/transport/cupsonline"
-	"openflux/transport/mailru"
 	"openflux/transport/manager"
 	"openflux/transport/oneme"
+	"openflux/transport/script"
 	"openflux/transport/yandex"
 )
 
@@ -41,12 +40,27 @@ func transportFactory(baseCfg transport.TransportConfig) manager.Factory {
 			return yandex.NewYandexDocsTransport(cfg.URL, baseCfg), nil
 		case "vyandex":
 			return newVolgaTransport(cfg.URL, baseCfg)
-		case "boards":
-			return yandex.NewBoardsTransport(cfg.URL, baseCfg), nil
-		case "mailru":
-			return mailru.NewMailruDocsTransport(cfg.URL, baseCfg), nil
-		case "cupsonline":
-			return cupsonline.NewCupsonlineTransport(cfg.URL, baseCfg, false), nil
+		case "script":
+			// path: either a plain .js file (its detached path+".sig" must
+			// verify) or a .flux package (script+manifest+icon signed
+			// together - see transport/script/flux.go), picked by extension.
+			// pubkey: hex ed25519 public key it must be signed with.
+			// name: optional, defaults to the script's own info().name for
+			// logging - the factory doesn't know that until Start().
+			scriptPath, _ := cfg.Params["path"].(string)
+			pubkeyHex, _ := cfg.Params["pubkey"].(string)
+			name, _ := cfg.Params["name"].(string)
+			if name == "" {
+				name = "script"
+			}
+			if scriptPath == "" {
+				return nil, fmt.Errorf("factory: script transport missing \"path\" param")
+			}
+			pubKey, err := script.DecodePublicKeyHex(pubkeyHex)
+			if err != nil {
+				return nil, fmt.Errorf("factory: script transport: %w", err)
+			}
+			return script.New(name, scriptPath, pubKey, cfg.URL, cfg.Params, baseCfg)
 		case "oneme":
 			token, _ := cfg.Params["token"].(string)
 			uidStr, _ := cfg.Params["uid"].(string)

@@ -11,7 +11,10 @@ func TestBuildTransportSpecsKeepsConfURL(t *testing.T) {
 		{Name: "yandex", Type: "yandex", URL: "https://disk.yandex.ru/i/conf"},
 	}
 	urls := map[string]string{"vyandex": "", "yandex": "https://disk.yandex.ru/i/flag"}
-	got := buildTransportSpecs(specs, urls, nil)
+	got, err := buildTransportSpecs(specs, urls, nil, "", "")
+	if err != nil {
+		t.Fatalf("buildTransportSpecs: %v", err)
+	}
 	if got[0].URL != "https://docs.yandex.ru/edit/d/conf" {
 		t.Fatalf("unset flag wiped the conf URL: %q", got[0].URL)
 	}

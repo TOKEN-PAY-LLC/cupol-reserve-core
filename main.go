@@ -16,9 +16,7 @@ import (
 	"openflux/socks5"
 	"openflux/transport"
 	"openflux/transport/control"
-	"openflux/transport/cupsonline"
 	"openflux/transport/ipc"
-	"openflux/transport/mailru"
 	"openflux/transport/manager"
 	"openflux/transport/oneme"
 	"openflux/transport/yandex"
@@ -106,8 +104,15 @@ const (
 // transportHasCookies reports whether the given transport uses HTTP cookies
 // that can be refreshed via the NegotiatedTransport control channel.
 func transportHasCookies(t string) bool {
+	if strings.HasPrefix(t, "script:") {
+		// Every script transport gets FetchCookies/ApplyCookies for free
+		// (transport/script's shared cookiejar.Jar) - assume it wants the
+		// store too; a script that never uses cookies just ends up with an
+		// empty jar file, harmless.
+		return true
+	}
 	switch t {
-	case "yandex", "vyandex", "boards", "mailru", "cupsonline":
+	case "yandex", "vyandex":
 		return true
 	}
 	return false
@@ -147,7 +152,7 @@ func isNumber(s string) bool {
 //	explicit      --session-context, if non-empty
 //	--url         globalURL, if set and not the placeholder
 //	transports    URL of the highest-priority transport that has one,
-//	              cupsonline aside
+//	              cupsonline (native or script:cupsonline) aside
 //	fallback      the placeholder "http://#"
 //
 // A cupsonline "URL" is the room list the exit creates when it starts and
@@ -167,7 +172,10 @@ func pickSessionContext(explicit, globalURL string, specs []transportSpec) strin
 	}
 	best := -1
 	for i, s := range specs {
-		if s.Type == "cupsonline" || s.URL == "" || s.URL == placeholder {
+		// cupsonline is script-only now (script:cupsonline expands Type to
+		// "script" but keeps Name == "cupsonline"), so the exclusion has to
+		// key off Name, not Type, to still catch it.
+		if s.Name == "cupsonline" || s.URL == "" || s.URL == placeholder {
 			continue
 		}
 		if best < 0 || s.Priority > specs[best].Priority {
@@ -206,7 +214,7 @@ func main() {
 
 	role := flag.String("role", roleClient, "client | exit | bench-send | bench-sink")
 	inbound := flag.String("inbound", "", "tun | socks5 (client only; default: tun on macOS, socks5 elsewhere)")
-	transportType := flag.String("transport", "yandex", "Transport type (yandex, vyandex, oneme, cupsonline, mailru)")
+	transportType := flag.String("transport", "yandex", "Transport type (yandex, vyandex, oneme, script:<name> - e.g. script:mailru, script:boards, script:cupsonline)")
 	mode := flag.String("mode", "", "Exit-node mode: l3 (default, Linux only) or l4 (works everywhere)")
 
 	codec := flag.String("codec", codecBatched, "batched (default, zstd+coalescing) or legacy (per-packet LZ4)")
@@ -230,15 +238,19 @@ func main() {
 	directListen := flag.String("direct-listen", "", "DirectTransport: local address to listen on (exit). Requires --encryption-key-file")
 	transportsFlag := flag.String("transports", "",
 		"Comma-separated list of transports with priorities, e.g. "+
-			"\"direct:100,yandex:50\". If empty, --transport is used as a single transport.")
+			"\"direct:100,yandex:50,script:mailru:30\". If empty, --transport is used as a single transport.")
 	yandexURL := flag.String("yandex-url", "", "URL for the yandex transport (overrides --url in --transports mode)")
 	vyandexURL := flag.String("vyandex-url", "", "URL for the vyandex transport")
 	flag.StringVar(&yandexCookiesFile, "yandex-cookies-file", "", "Netscape cookies.txt with a Yandex login for vyandex transports")
-	boardsURL := flag.String("boards-url", "", "URL for the boards transport")
-	mailruURL := flag.String("mailru-url", "", "URL (weblink) for the mailru transport")
-	cupsonlineURL := flag.String("cupsonline-url", "", "URL for the cupsonline transport")
 	onemeToken := flag.String("oneme-token", "", "MAX token for the oneme transport")
 	onemeUID := flag.String("oneme-uid", "", "MAX uid for the oneme transport")
+	scriptDir := flag.String("script-dir", "",
+		"Directory holding signed script transports: <name>.js + <name>.js.sig, or a "+
+			"<name>.flux package (script+manifest+icon signed together) - .flux wins if both exist. "+
+			"Select one with --transport=script:<name> or \"script:<name>:<priority>\" in --transports.")
+	scriptPubkey := flag.String("script-pubkey", "",
+		"Hex ed25519 public key every script transport's signature must verify against (the detached "+
+			".sig, or the .flux package's own signature). Required with --script-dir.")
 	configPath := flag.String("config", "",
 		"Path to an OpenFlux .conf file. Command-line flags override values from the file.")
 	shareFlag := flag.Bool("share", false,
@@ -289,9 +301,10 @@ TRANSPORT  (single-transport mode)
   -t, --transport=yandex       Yandex.Docs over WebSocket. (default)
   -t, --transport=vyandex      Yandex.Volga over HTTP relay + WS.
   -t, --transport=oneme        MAX (VK) over WebRTC.
-  -t, --transport=cupsonline   Cups.online interview rooms.
-  -t, --transport=mailru       Mail.ru Docs over WebSocket.
   -t, --transport=direct       Plain TCP to a self-hosted exit.
+  -t, --transport=script:<name>
+                               Signed JS transport (mailru, boards,
+                               cupsonline, ...) loaded from --script-dir.
   -u, --url=<URL>              Document URL.
 
 TRANSPORTS  (multi-transport session; requires --encryption-key-file)
@@ -306,9 +319,6 @@ TRANSPORTS  (multi-transport session; requires --encryption-key-file)
       --yandex-cookies-file=<path>
                                Netscape cookies.txt with a Yandex login for
                                vyandex transports.
-      --boards-url=<URL>       URL for the boards transport.
-      --mailru-url=<WEBLINK>   Weblink for the mailru transport.
-      --cupsonline-url=<URL>   URL for the cupsonline transport.
       --oneme-token=<token>    MAX auth token for the oneme transport.
       --oneme-uid=<uid>        MAX user id for the oneme transport.
       --direct-dial=<addr>     DirectTransport: exit host:port (client).
@@ -591,24 +601,22 @@ DEPRECATED (removed in v2)
 		specs = confTransports
 		// Per-type URL flags still override config values.
 		urls := map[string]string{
-			"yandex":     *yandexURL,
-			"vyandex":    *vyandexURL,
-			"boards":     *boardsURL,
-			"mailru":     *mailruURL,
-			"cupsonline": *cupsonlineURL,
+			"yandex":  *yandexURL,
+			"vyandex": *vyandexURL,
 		}
-		specs = buildTransportSpecs(specs, urls, nil)
+		var buildErr error
+		specs, buildErr = buildTransportSpecs(specs, urls, nil, *scriptDir, *scriptPubkey)
+		if buildErr != nil {
+			log.Fatalf("[Transport] sections: %v", buildErr)
+		}
 	} else if *transportsFlag != "" {
 		parsed, err := parseTransportList(*transportsFlag)
 		if err != nil {
 			log.Fatalf("--transports: %v", err)
 		}
 		urls := map[string]string{
-			"yandex":     *yandexURL,
-			"vyandex":    *vyandexURL,
-			"boards":     *boardsURL,
-			"mailru":     *mailruURL,
-			"cupsonline": *cupsonlineURL,
+			"yandex":  *yandexURL,
+			"vyandex": *vyandexURL,
 		}
 		if globalDocUrl != "" && globalDocUrl != "http://#" && urls["yandex"] == "" {
 			urls["yandex"] = globalDocUrl
@@ -621,7 +629,11 @@ DEPRECATED (removed in v2)
 				"is_exit": *role == roleExit,
 			},
 		}
-		specs = buildTransportSpecs(parsed, urls, extra)
+		var buildErr error
+		specs, buildErr = buildTransportSpecs(parsed, urls, extra, *scriptDir, *scriptPubkey)
+		if buildErr != nil {
+			log.Fatalf("--transports: %v", buildErr)
+		}
 	} else {
 		specs = []transportSpec{{
 			Name:     "primary",
@@ -638,6 +650,13 @@ DEPRECATED (removed in v2)
 			specs[0].Params = map[string]interface{}{
 				"dial": *directDial, "listen": *directListen, "is_exit": *role == roleExit,
 			}
+		}
+		if strings.HasPrefix(*transportType, "script:") {
+			expanded, err := expandScriptType(specs[0], *scriptDir, *scriptPubkey)
+			if err != nil {
+				log.Fatalf("%v", err)
+			}
+			specs[0] = expanded
 		}
 	}
 
@@ -781,8 +800,6 @@ DEPRECATED (removed in v2)
 		// Legacy single-transport path (no negotiate, no multi).
 		var inner transport.Transport
 		switch *transportType {
-		case "boards":
-			inner = yandex.NewBoardsTransport(globalDocUrl, config)
 		case "vyandex":
 			t, err := newVolgaTransport(globalDocUrl, config)
 			if err != nil {
@@ -794,12 +811,22 @@ DEPRECATED (removed in v2)
 		case "oneme":
 			uidint, _ := strconv.ParseInt(maxUid, 10, 64)
 			inner = oneme.NewOneMeTransport(*role == roleExit, maxToken, uidint, config)
-		case "cupsonline":
-			inner = cupsonline.NewCupsonlineTransport(globalDocUrl, config, *role != roleExit)
-		case "mailru":
-			inner = mailru.NewMailruDocsTransport(globalDocUrl, config)
 		default:
-			log.Fatalf("Unknown transport type: %s", *transportType)
+			if strings.HasPrefix(*transportType, "script:") {
+				expanded, err := expandScriptType(transportSpec{Type: *transportType}, *scriptDir, *scriptPubkey)
+				if err != nil {
+					log.Fatalf("%v", err)
+				}
+				t, err := transportFactory(config)(&control.TransportConfig{
+					Name: expanded.Name, Type: expanded.Type, URL: globalDocUrl, Params: expanded.Params,
+				})
+				if err != nil {
+					log.Fatalf("script transport: %v", err)
+				}
+				inner = t
+			} else {
+				log.Fatalf("Unknown transport type: %s", *transportType)
+			}
 		}
 
 		// Persist cookie exchanger for the legacy path.
