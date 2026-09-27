@@ -945,6 +945,7 @@ func ipcStatusLoop(srv *ipc.Server, m *manager.Manager) {
 			BytesOut:  st.BytesSent,
 			UptimeMs:  time.Since(started).Milliseconds(),
 			Active:    m.Session().ActiveTransport(),
+			ActiveAll: m.Session().ActiveTransports(),
 		})
 	}
 }
