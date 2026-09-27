@@ -1,13 +1,14 @@
 // OpenFlux script-transport template.
 //
-// A script transport is one .js file that implements everything a native
-// Go transport would: the auth/handshake flow, wire framing, reconnect and
-// keepalive policy. It is loaded into its own goja runtime (one per
-// transport instance) and gets an unrestricted host API - there is no
-// capability sandboxing. The only gate is the signature check the Go side
-// runs before this file is ever evaluated: it must ship as
-// `<name>.js` + `<name>.js.sig`, signed with a key the exit/node trusts
-// (see transport/script/sign.go, cmd/scriptsign).
+// A script transport is one .js file (or a .flux package - see below) that
+// implements everything a native Go transport would: the auth/handshake
+// flow, wire framing, reconnect and keepalive policy. It is loaded into its
+// own goja runtime (one per transport instance) and gets an unrestricted
+// host API - there is no capability sandboxing. The only gate is the
+// signature check the Go side runs before this file is ever evaluated: it
+// must ship as `<name>.js` + `<name>.js.sig`, or as a signed `<name>.flux`
+// package, signed with a key the exit/node trusts (see
+// transport/script/sign.go, transport/script/flux.go, cmd/scriptsign).
 //
 // Everything below is the full contract. Delete what you don't need,
 // but keep the shape: a global `Transport` object with these members.
@@ -26,6 +27,14 @@ var Transport = {
       // Leave empty if this transport doesn't need cookies.
       cookieDomain: "https://example.com/",
 
+      // If true, ApplyCookies (the generic downward cookie-exchange path -
+      // see onEvent below) scopes applied cookies to the PARENT domain
+      // instead of cookieDomain's exact host, so a cookie obtained on one
+      // subdomain (e.g. a captcha solved on disk.example.com) still reaches
+      // a sibling subdomain (docs.example.com) this transport actually
+      // talks to. Leave false if you only ever touch cookieDomain's own host.
+      scopeCookiesToParentDomain: false,
+
       // Advisory only. The core never fragments, reorders or rate-limits
       // on your behalf unless you ask - omit these (or leave at defaults)
       // to get plain passthrough: whatever byte string write() is called
@@ -35,6 +44,14 @@ var Transport = {
       ordered: false,      // does it guarantee order?
       halfDuplex: false,
       minIntervalMs: 0,   // floor between sends, if the channel needs one
+
+      // HTTP connection-pool tuning for the shared *http.Transport behind
+      // http.fetch/http.newSession. Leave at 0 for Go's small default pool
+      // (fine for a low-rate doc-cursor transport); size these up if you
+      // fan out many concurrent requests via concurrency.pool (see below).
+      httpMaxConnsPerHost: 0,
+      httpMaxIdleConns: 0,
+      httpIdleConnTimeoutMs: 0,
 
       // What this transport needs from the operator before open() can
       // work. Purely declarative - the manager/CLI/UI use this to build a
@@ -105,21 +122,46 @@ var Transport = {
   // onEvent(kind, payload) -> optional. Downward OOB delivery: the host
   // application calls this (via ScriptTransport.Deliver on the Go side)
   // to hand you a captcha answer, fresh cookies, or an arbitrary inject.
-  // Omit this entirely if your transport never needs it.
+  // Omit this entirely if your transport never needs it. "cookiesApplied"
+  // specifically fires after the Go side has ALREADY written externally
+  // supplied cookies into the shared jar (see ApplyCookies/
+  // scopeCookiesToParentDomain above) - you just need to act on them
+  // (usually: tear down and reopen your socket).
   onEvent: function (kind, payload) {
-    // if (kind === "cookies") cookieJar.set(payload);
+    // if (kind === "cookiesApplied") { /* reconnect with the new cookies */ }
     // if (kind === "captchaAnswer") { ... }
   },
 };
 
 // ---- Host API available to every script (all globals, no import) ----
 //
-// http.fetch(opts) -> Promise<{status, url, body, headers}>
-//   opts: { url, method, headers, body }. `url` in the result is the
-//   FINAL url after redirects - check it against what you asked for to
-//   detect a bounce to a login/captcha page.
+// Nothing here is capability-scoped: dial anywhere, fetch anything. The
+// only trust boundary is the signature on this file (or .flux package).
 //
-// ws.open(url, headers) -> Promise<Socket>
+// -- HTTP --
+//
+// http.fetch(opts) -> Promise<{status, url, body, headers}>
+//   opts: { url, method, headers, body, redirect }. `url` in the result is
+//   the FINAL url after redirects - check it against what you asked for to
+//   detect a bounce to a login/captcha page. redirect: "manual" (default
+//   "follow") stops Go from auto-following, so you see the 3xx and its
+//   Location header yourself instead of only the final response.
+//
+// http.newSession() -> Session { fetch(opts), cookies }
+//   An ISOLATED cookie jar + http.Client pair (same dialer/pool tuning as
+//   the default session). Use this when you manage several independent
+//   logical sessions against the same domain - a single shared jar lets
+//   the last session's cookies silently clobber every earlier one's,
+//   since cookie names collide across sessions on one domain.
+//   session.cookies.get(url) -> {name: value, ...}
+//   session.cookies.set(url, {name: value, ...}, domain?)
+//
+// -- WebSocket --
+//
+// ws.open(url, headers, opts?) -> Promise<Socket>
+//   opts: { readTimeoutMs } - reset before every read; a connection that
+//   falls silent longer than this fires onclose instead of hanging the
+//   reader forever. Omit/0 = no deadline.
 //   Socket.send(text)             - text frame (JSON/Socket.IO protocols)
 //   Socket.send(bytes)            - binary frame, bytes = ArrayBuffer/TypedArray
 //   Socket.close()
@@ -129,15 +171,72 @@ var Transport = {
 //   (assign these any time after open() resolves; they're read lazily
 //   on every dispatch, so re-assigning mid-connection is fine)
 //
+// -- UDP --
+//
+// udp.open(remoteAddr, opts?) -> Promise<Socket>
+//   Dial-only (connected) datagram socket, same Socket shape as ws.open
+//   (send(bytes)/onmessage/onclose/close). opts: { readTimeoutMs }.
+//
+// -- WebRTC --
+//
+// webrtc.newPeerConnection({iceServers, iceTransportPolicy}) -> PeerConnection
+//   PeerConnection.createDataChannel(label, {ordered, maxRetransmits}) -> DataChannel
+//   PeerConnection.createOffer() -> Promise<sdpString>
+//   PeerConnection.createAnswer() -> Promise<sdpString>
+//   PeerConnection.setLocalDescription(type, sdp) -> Promise
+//   PeerConnection.setRemoteDescription(type, sdp) -> Promise   (type: "offer"|"answer")
+//   PeerConnection.addIceCandidate({candidate, sdpMid, sdpMLineIndex}) -> Promise
+//   PeerConnection.close()
+//   PeerConnection.onicecandidate = function(candidateInitOrNull) {}
+//   PeerConnection.onconnectionstatechange = function(stateString) {}
+//   PeerConnection.oniceconnectionstatechange = function(stateString) {}
+//   PeerConnection.ondatachannel = function(dataChannel) {}   // remote-initiated
+//   DataChannel.send(bytesOrText) / .onmessage / .onopen / .onclose / .close()
+//   ICE/DTLS/SCTP are native (pion/webrtc) - genuinely can't be JS. Everything
+//   ABOVE this (signaling, when to offer/answer, retry policy) is yours.
+//
+// -- Cookies --
+//
 // cookieJar.get() -> {name: value, ...}      (against info().cookieDomain)
-// cookieJar.set({name: value, ...})
+// cookieJar.set({name: value, ...}, domain?)
+//
+// -- Codecs --
 //
 // base64.encode(bytes) -> string     base64.decode(string) -> ArrayBuffer
-//   Only needed if YOUR wire format is textual (JSON, a cursor field, ...).
-//   The write()/emit() packet boundary itself is always raw bytes.
+// text.encode(string) -> ArrayBuffer  text.decode(bytes) -> string   (UTF-8)
+// gzip.compress(bytes) -> ArrayBuffer  gzip.decompress(bytes) -> ArrayBuffer
+// lz4.decompressBlock(bytes, expectedSize) -> ArrayBuffer
+//   (LZ4 BLOCK format, not the streaming/frame format - needs the
+//   decompressed size upfront, there's no end marker)
 //
+// -- Crypto --
+//
+// crypto.sha256(bytes) -> ArrayBuffer
+// crypto.solvePow(prefixHexOrRaw, complexity) -> {nonceHex, attempts}
+//   The one native-speed exception: a hash-based PoW brute force (e.g. a
+//   captcha's proof-of-work) needs millions of attempts, and a per-attempt
+//   JS<->Go call would dwarf the hash cost. Everything ELSE stays in JS.
+//
+// -- Concurrency --
+//
+// concurrency.pool(n) -> Pool { run(fn) -> Promise, size() }
+//   Gates at most n concurrent in-flight fn() calls through a Go semaphore.
+//   fn's own work still runs with true OS-level concurrency (e.g. an
+//   http.fetch call) - this only adds bounded fan-out bookkeeping, for a
+//   transport that needs real concurrent throughput (goja itself is
+//   single-threaded; this is how you get real parallelism anyway).
+//
+// -- Misc --
+//
+// url.parse(str) -> {href, protocol, hostname, host, pathname, search, hash}
+//   goja has no WHATWG URL global; backed by Go's net/url.
 // setTimeout/setInterval/clearTimeout/clearInterval, console.log/warn/error
 //   - standard, run on this transport's own loop.
+// require("./local/module.js") - only at AUTHOR time: see cmd/scriptbundle.
+//   The runtime itself never loads a module from disk; scriptbundle inlines
+//   local requires into one flat, self-contained file BEFORE you sign it.
+//
+// -- The Go <-> JS packet boundary --
 //
 // emit(bytes)                 - deliver one received application packet up,
 //                                bytes = ArrayBuffer/TypedArray, zero-copy
@@ -145,6 +244,3 @@ var Transport = {
 //                                "degraded"|"dead"
 // raise(kind, payload)        - upward OOB event, e.g.
 //                                raise("captchaRequired", {url: "..."})
-//
-// Nothing here is capability-scoped: dial anywhere, fetch anything. The
-// only trust boundary is the signature on this file.
