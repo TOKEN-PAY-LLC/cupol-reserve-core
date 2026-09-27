@@ -7,6 +7,7 @@ enum TransportKind: String, CaseIterable, Identifiable {
     case boards = "boards"
     case direct = "direct"
     case mail = "mailru"
+    case cupsonline = "cupsonline"
     case max = "oneme"
     var id: String { rawValue }
     var title: String {
@@ -16,11 +17,13 @@ enum TransportKind: String, CaseIterable, Identifiable {
         case .boards: return "Yandex Boards"
         case .direct: return "Прямой TCP (нужен ключ)"
         case .mail:   return "Mail.ru"
+        case .cupsonline: return "Cups.online"
         case .max:    return "MAX"
         }
     }
     /// Document-based transports that take a public document URL / weblink.
-    var usesDocURL: Bool { self == .yandex || self == .volga || self == .boards || self == .mail }
+    /// cupsonline берёт в это же поле не ссылку, а base64-строку комнат из лога узла.
+    var usesDocURL: Bool { self == .yandex || self == .volga || self == .boards || self == .mail || self == .cupsonline }
     /// direct берёт в том же поле не ссылку на документ, а host:port узла.
     var usesNodeAddr: Bool { self == .direct }
 }

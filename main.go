@@ -12,6 +12,7 @@ import (
 	_ "github.com/wlynxg/anet"
 	"universal-bypass-tool/socks5"
 	"universal-bypass-tool/transport"
+	"universal-bypass-tool/transport/cupsonline"
 	"universal-bypass-tool/transport/mailru"
 	"universal-bypass-tool/transport/oneme"
 	"universal-bypass-tool/transport/yandex"
@@ -57,6 +58,13 @@ func buildMuxTransport(urlSpec string, factory func(string) transport.Transport)
 }
 
 func main() {
+	// Мастер установки узла: отдельный режим, разговаривает с десктопным
+	// приложением по stdin/stdout построчным JSON. Проверяется до разбора
+	// флагов, потому что это не обычный запуск туннеля.
+	if len(os.Args) == 2 && os.Args[1] == "--node-wizard" {
+		os.Exit(runNodeWizard(os.Stdin, os.Stdout))
+	}
+
 	//os.Setenv("GODEBUG", "netdns=go")
 	fmt.Print("written by p1neappleXpress\n")
 
@@ -64,7 +72,7 @@ func main() {
 	client := flag.Bool("client", false, "Run as client")
 	debug := flag.Bool("debug", false, "Enable verbose debug logging")
 	socksAddr := flag.String("socks5", ":1080", "SOCKS5 address")
-	transportType := flag.String("transport", "yandex", "Transport type (yandex, google, custom)")
+	transportType := flag.String("transport", "yandex", "Transport type (yandex, vyandex, boards, mailru, cupsonline, direct, oneme)")
 	flag.StringVar(&globalDocUrl, "url", "http://#", "Document URL for Yandex.Docs transport. Comma-separated list = multiplex across N documents (client and exit node must pass the same list)")
 	flag.StringVar(&maxToken, "maxToken", "", "MAX call user id. If u use MAX transport")
 	flag.StringVar(&maxUid, "maxUid", "", "MAX Web token. If u use MAX transport")
@@ -157,6 +165,11 @@ func main() {
 		trans = buildMuxTransport(globalDocUrl, func(u string) transport.Transport {
 			return mailru.NewMailruDocsTransport(u, config)
 		})
+	case "cupsonline":
+		trans = buildMuxTransport(globalDocUrl, func(u string) transport.Transport {
+			// isClient = не exit-нода, как в upstream (role != exit).
+			return cupsonline.NewCupsonlineTransport(u, config, !*exitNode)
+		})
 	case "oneme":
 		uidint, _ := strconv.ParseInt(maxUid, 10, 64)
 		trans = transport.NewCompressedTransport(oneme.NewOneMeTransport(*exitNode, maxToken, uidint, config))
@@ -178,7 +191,16 @@ func main() {
 		if err != nil {
 			log.Fatalf("Read encryption key file: %v", err)
 		}
-		context := pickSessionContext(*sessionContext, globalDocUrl)
+		// Список комнат cupsonline создаётся НОДОЙ при старте и раздаётся клиентам
+		// как --url, поэтому нода его заранее не знает и выводит контекст из "http://#".
+		// Если пустить этот URL в контекст — у клиента и ноды получатся РАЗНЫЕ ключи,
+		// рукопожатия не будет, а снаружи это выглядит как таймаут. Трактуем URL
+		// cupsonline как отсутствующий, ровно как upstream-нода. (из ветки bc9ada0)
+		ctxURL := globalDocUrl
+		if *transportType == "cupsonline" {
+			ctxURL = ""
+		}
+		context := pickSessionContext(*sessionContext, ctxURL)
 		encrypted, err := transport.NewEncryptedTransport(
 			trans, strings.TrimSpace(string(secretBytes)), context, *exitNode)
 		if err != nil {

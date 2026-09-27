@@ -153,6 +153,32 @@ type volgaAuth struct {
 	Cookies     []*http.Cookie
 }
 
+
+// VolgaDocument is what CheckVolgaDocument learned about a document.
+type VolgaDocument struct {
+	DocID    string
+	Editable bool
+}
+
+// CheckVolgaDocument runs the transport's own authorization against docURL
+// without joining the document, to tell whether the vyandex transport can
+// use it. It reuses our authorize(): the first-tier PoW captcha is solved
+// like on a real connect, and a SmartCaptcha or login wall comes back as
+// ErrCaptchaRequired / ErrLoginRequired. Reaching a successful authorize
+// means the Volga editor opened with an action_url, i.e. the link is
+// usable, so Editable is reported true.
+//
+// jar is accepted for signature compatibility with the cookie-jar auth
+// path that arrives with the fuller Volga session work; authorize() builds
+// its own session, so a nil jar (the only caller today) changes nothing.
+func CheckVolgaDocument(docURL string, jar http.CookieJar) (VolgaDocument, error) {
+	_ = jar
+	a, err := authorize(docURL)
+	if err != nil {
+		return VolgaDocument{}, err
+	}
+	return VolgaDocument{DocID: a.DocID, Editable: true}, nil
+}
 func authorize(docURL string) (*volgaAuth, error) {
 	utils.Debugf("[VOLGA] authorize(%s)", docURL)
 

@@ -36,6 +36,12 @@ func Debugf(format string, args ...interface{}) {
 	}
 }
 
+// Infof logs unconditionally (not gated by --debug), via the standard logger —
+// same as upstream, so ported transports (e.g. cupsonline) keep their info logs.
+func Infof(format string, args ...interface{}) {
+	log.Output(2, fmt.Sprintf(format, args...))
+}
+
 // SetDebug toggles verbose logging at runtime (off = Debugf becomes a no-op).
 func SetDebug(on bool) {
 	if on {

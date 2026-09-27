@@ -648,6 +648,7 @@ struct ContentView: View {
         case "boards": return "rectangle.3.group"
         case "direct": return "arrow.left.arrow.right"
         case "oneme":  return "m.square"
+        case "cupsonline": return "chevron.left.forwardslash.chevron.right"
         default:       return "doc.text"
         }
     }
@@ -663,7 +664,7 @@ struct ContentView: View {
             url = b.isEmpty ? a : "\(a),\(b)"
         case .volga: url = volgaURL.trimmingCharacters(in: .whitespaces)
         // boards появился уже после профилей — легаси-конфига для него не бывает
-        case .boards, .direct: break
+        case .boards, .direct, .cupsonline: break
         case .mail:  url = mailURL.trimmingCharacters(in: .whitespaces)
         case .max:   break
         }
@@ -727,6 +728,10 @@ struct ProfileEditorView: View {
                         TextField("адрес узла, например 1.2.3.4:9443", text: $single).autocapitalization(.none).disableAutocorrection(true)
                     case .mail:
                         TextField("https://cloud.mail.ru/public/…", text: $single).autocapitalization(.none).disableAutocorrection(true)
+                    case .cupsonline:
+                        TextField("строка комнат из лога узла (base64)", text: $single).autocapitalization(.none).disableAutocorrection(true)
+                        Text("Узел печатает её при запуске БЕЗ --url. Ключ шифрования — тот же, что на узле.")
+                            .font(.caption2).foregroundColor(.secondary)
                     case .max:
                         TextField("MAX token", text: $maxToken).autocapitalization(.none).disableAutocorrection(true)
                         TextField("MAX user ID", text: $maxUid).keyboardType(.numberPad)
@@ -812,7 +817,7 @@ struct ProfileEditorView: View {
         guard !name.trimmingCharacters(in: .whitespaces).isEmpty else { return false }
         switch transport {
         case .yandex: return !url1.trimmingCharacters(in: .whitespaces).isEmpty
-        case .volga, .boards, .mail, .direct: return !single.trimmingCharacters(in: .whitespaces).isEmpty
+        case .volga, .boards, .mail, .direct, .cupsonline: return !single.trimmingCharacters(in: .whitespaces).isEmpty
         case .max: return !maxToken.isEmpty && !maxUid.isEmpty
         }
     }
@@ -829,7 +834,7 @@ struct ProfileEditorView: View {
         case .yandex:
             url1 = parts.first ?? ""
             if parts.count > 1 { url2 = parts[1] }
-        case .volga, .boards, .mail, .direct:
+        case .volga, .boards, .mail, .direct, .cupsonline:
             single = parts.first ?? p.url
         case .max: break
         }
@@ -875,7 +880,7 @@ struct ProfileEditorView: View {
         }
         switch transport {
         case .yandex: url1 = s
-        case .volga, .boards, .mail, .direct: single = s
+        case .volga, .boards, .mail, .direct, .cupsonline: single = s
         case .max: return false
         }
         if name.trimmingCharacters(in: .whitespaces).isEmpty { name = transport.title }
@@ -896,7 +901,7 @@ struct ProfileEditorView: View {
             let value = (p.type == "direct" ? p.dial : p.url) ?? ""
             switch transport {
             case .yandex: url1 = value
-            case .volga, .boards, .mail, .direct: single = value
+            case .volga, .boards, .mail, .direct, .cupsonline: single = value
             case .max: break
             }
         }
@@ -921,7 +926,7 @@ struct ProfileEditorView: View {
         case .yandex:
             url1 = parsed.urls.first ?? ""
             url2 = parsed.urls.count > 1 ? parsed.urls[1] : ""
-        case .volga, .boards, .mail, .direct:
+        case .volga, .boards, .mail, .direct, .cupsonline:
             single = parsed.urls.first ?? ""
         case .max: break
         }
@@ -938,7 +943,7 @@ struct ProfileEditorView: View {
             let a = url1.trimmingCharacters(in: .whitespaces)
             let b = url2.trimmingCharacters(in: .whitespaces)
             url = b.isEmpty ? a : "\(a),\(b)"
-        case .volga, .boards, .mail, .direct:
+        case .volga, .boards, .mail, .direct, .cupsonline:
             url = single.trimmingCharacters(in: .whitespaces)
         case .max:
             url = ""

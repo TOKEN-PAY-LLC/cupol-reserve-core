@@ -24,6 +24,7 @@ import (
 
 	"universal-bypass-tool/socks5"
 	"universal-bypass-tool/transport"
+	"universal-bypass-tool/transport/cupsonline"
 	"universal-bypass-tool/transport/mailru"
 	"universal-bypass-tool/transport/oneme"
 	"universal-bypass-tool/transport/yandex"
@@ -272,8 +273,13 @@ func wrapEncryption(inner transport.Transport, transportType, docURL string) (tr
 	// это адрес узла, а он у сторон разный (узел слушает 0.0.0.0, клиент
 	// набирает публичный IP), поэтому он в контекст не идёт и остаётся
 	// плейсхолдер — ровно как у них.
+	// direct: docURL — это host:port узла, у сторон разный, поэтому не идёт в
+	// контекст. cupsonline: docURL — список комнат, который узел создаёт при
+	// старте и раздаёт клиентам, поэтому у узла его нет (контекст "http://#");
+	// пустить его в контекст — значит развести ключи и молча потерять связь.
 	context := contextPlaceholder
-	if transportType != "direct" && docURL != "" && docURL != contextPlaceholder {
+	if transportType != "direct" && transportType != "cupsonline" &&
+		docURL != "" && docURL != contextPlaceholder {
 		context = docURL
 	}
 	enc, err := transport.NewEncryptedTransport(inner, secret, context, false)
@@ -389,6 +395,12 @@ func OpenFluxStartClient(transportType, url, socksAddr, maxToken, maxUid *C.char
 	case "mailru", "mail":
 		t = buildDocTransport(docURL, config, func(u string) transport.Transport {
 			return mailru.NewMailruDocsTransport(u, config)
+		})
+	case "cupsonline":
+		// docURL — packed base64 список комнат, который узел печатает при
+		// старте (запуск без --url). Клиент здесь всегда isClient=true.
+		t = buildDocTransport(docURL, config, func(u string) transport.Transport {
+			return cupsonline.NewCupsonlineTransport(u, config, true)
 		})
 	case "oneme":
 		uidint, _ := strconv.ParseInt(mUid, 10, 64)

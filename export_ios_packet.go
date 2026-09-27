@@ -23,6 +23,7 @@ import (
 
 	"universal-bypass-tool/network"
 	"universal-bypass-tool/transport"
+	"universal-bypass-tool/transport/cupsonline"
 	"universal-bypass-tool/transport/mailru"
 	"universal-bypass-tool/transport/oneme"
 	"universal-bypass-tool/transport/yandex"
@@ -124,6 +125,11 @@ func OpenFluxStartPacketTunnel(transportType, url, maxToken, maxUid *C.char) (rc
 	case "mailru", "mail":
 		t = buildDocTransport(docURL, config, func(u string) transport.Transport {
 			return mailru.NewMailruDocsTransport(u, config)
+		})
+	case "cupsonline":
+		// docURL — packed base64 список комнат (узел печатает при старте).
+		t = buildDocTransport(docURL, config, func(u string) transport.Transport {
+			return cupsonline.NewCupsonlineTransport(u, config, true)
 		})
 	case "oneme":
 		uidint, _ := strconv.ParseInt(mUid, 10, 64)
