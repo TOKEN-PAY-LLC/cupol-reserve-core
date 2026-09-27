@@ -36,6 +36,10 @@ struct ContentView: View {
     @AppStorage("dnsPreset") private var dnsPreset: String = "default"
     @AppStorage("dnsCustom") private var dnsCustom: String = ""
     @AppStorage("tunnelUDP") private var tunnelUDP: Bool = false
+    // On-demand авто-переподключение системного VPN. Вкл по умолчанию (как было),
+    // но выключаемо: при флапе тоннеля on-demand не даёт докачать обновление из
+    // TestFlight/App Store — тот самый софтлок «не могу обновиться».
+    @AppStorage("autoReconnect") private var autoReconnect: Bool = true
 
     @State private var showInfo = false
     @State private var showSettings = false
@@ -156,7 +160,7 @@ struct ContentView: View {
                       dns: dnsSpec, tunnelUDP: tunnelUDP,
                       split: splitRU ? "ru-direct" : "",
                       directDomains: directDomains.joined,
-                      profileID: p.id)
+                      profileID: p.id, onDemand: autoReconnect)
         }
     }
 
@@ -270,6 +274,7 @@ struct ContentView: View {
                 SettingsSheet(socksPort: $socksPort, debugLog: $debugLog,
                               splitRU: $splitRU, dnsPreset: $dnsPreset,
                               dnsCustom: $dnsCustom, tunnelUDP: $tunnelUDP,
+                              autoReconnect: $autoReconnect,
                               tunnel: tunnel, vpn: vpn,
                               directDomains: directDomains,
                               selectedProfile: store.selected,
@@ -333,7 +338,8 @@ struct ContentView: View {
                           dns: dnsSpec, tunnelUDP: tunnelUDP,
                           split: splitRU ? "ru-direct" : "",
                           directDomains: directDomains.joined,
-                          profileID: inline.id, keySlot: "direct")
+                          profileID: inline.id, keySlot: "direct",
+                          onDemand: autoReconnect)
             }
         } else if let d = directProfile {
             store.select(d.id)
@@ -969,6 +975,7 @@ struct SettingsSheet: View {
     @Binding var dnsPreset: String
     @Binding var dnsCustom: String
     @Binding var tunnelUDP: Bool
+    @Binding var autoReconnect: Bool
     @ObservedObject var tunnel: TunnelController
     @ObservedObject var vpn: VPNController
     @ObservedObject var directDomains: DirectDomainStore
@@ -1021,6 +1028,10 @@ struct SettingsSheet: View {
                     Toggle("Туннелировать UDP / QUIC", isOn: $tunnelUDP)
                         .disabled(vpn.active)
                     Text("Выкл = QUIC падает на TCP (работает на любом узле). Вкл = требуется UDP-совместимый узел.")
+                        .font(.caption2).foregroundColor(.secondary)
+                    Toggle("Автопереподключение (on-demand)", isOn: $autoReconnect)
+                        .disabled(vpn.active)
+                    Text("Вкл = iOS сам поднимает VPN после обрыва. Выключи, если не можешь обновить приложение или скачать что-то: при флапе тоннеля on-demand перехватывает трафик и рвёт загрузку. Меняется при выключенном VPN.")
                         .font(.caption2).foregroundColor(.secondary)
                 }
 

@@ -268,7 +268,9 @@ func (t *MailruDocsTransport) connectToDoc(attempt int) {
 				conn.Close()
 
 				next := attempt
-				if time.Since(connectedAt) > 15*time.Second {
+				// Порог 45с (не 15): при флапе раз в 15-20с прежний сброс держал
+				// бэкофф вечно на минимуме и превращал реконнекты в долбёжку.
+				if time.Since(connectedAt) > 45*time.Second {
 					next = -1
 				}
 				t.scheduleReconnect(next)
@@ -422,8 +424,8 @@ func reconnectBackoff(n int) time.Duration {
 		shift = 5
 	}
 	d := 500 * time.Millisecond * time.Duration(1<<uint(shift))
-	if d > 15*time.Second {
-		d = 15 * time.Second
+	if d > 6*time.Second {
+		d = 6 * time.Second
 	}
 	// add up to +50% jitter
 	d += time.Duration(rand.Int63n(int64(d/2) + 1))

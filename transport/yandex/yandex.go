@@ -387,11 +387,19 @@ func (t *YandexDocsTransport) connectToDoc(attempt int) {
 			if err != nil {
 				utils.Debugf("[YDOCS] Read error: %v", err)
 				t.SetConnected(false)
+				// Закрываем мёртвый сокет явно: gorilla на ошибке чтения его не
+				// закрывает, а на реконнекте session переприсваивается, и старый
+				// fd повисает в CLOSE_WAIT до финализатора GC. У NE-процесса лимит
+				// fd маленький — за серию реконнектов это утечка. (mailru так уже
+				// делает.)
+				session.forceClose()
 				// If the session was healthy for a while, treat the next
 				// connect as fresh (attempt -1 -> next attempt 0) so backoff
 				// doesn't keep growing across normal long-lived reconnects.
+				// Порог 45с (а не 15): при флапе раз в 15-20с прежний сброс держал
+				// бэкофф вечно на минимуме и превращал реконнекты в частую долбёжку.
 				next := attempt
-				if time.Since(connectedAt) > 15*time.Second {
+				if time.Since(connectedAt) > 45*time.Second {
 					next = -1
 				}
 				t.scheduleReconnect(next)
@@ -589,8 +597,8 @@ func reconnectBackoff(n int) time.Duration {
 		shift = 5
 	}
 	d := 500 * time.Millisecond * time.Duration(1<<uint(shift))
-	if d > 15*time.Second {
-		d = 15 * time.Second
+	if d > 6*time.Second {
+		d = 6 * time.Second
 	}
 	// add up to +50% jitter
 	d += time.Duration(rand.Int63n(int64(d/2) + 1))

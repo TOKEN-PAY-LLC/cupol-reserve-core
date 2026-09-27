@@ -29,7 +29,7 @@ final class VPNController: ObservableObject {
     func start(transport: String, url: String, maxToken: String, maxUid: String,
                dns: String, tunnelUDP: Bool, split: String = "",
                directDomains: String = "", profileID: UUID? = nil,
-               keySlot: String = "") {
+               keySlot: String = "", onDemand: Bool = true) {
         Task {
             let m = manager ?? NETunnelProviderManager()
             let proto = NETunnelProviderProtocol()
@@ -53,9 +53,12 @@ final class VPNController: ObservableObject {
             m.isEnabled = true
             // Auto-reconnect: with on-demand enabled, iOS relaunches the tunnel
             // whenever it drops (extension killed, network change, etc.) instead
-            // of leaving the user to toggle it back on manually.
-            m.isOnDemandEnabled = true
-            m.onDemandRules = [NEOnDemandRuleConnect()]
+            // of leaving the user to toggle it back on manually. Downside — while
+            // the tunnel flaps, on-demand keeps grabbing traffic and can starve a
+            // TestFlight/App Store download (the "can't update" softlock), so it's
+            // user-toggleable.
+            m.isOnDemandEnabled = onDemand
+            m.onDemandRules = onDemand ? [NEOnDemandRuleConnect()] : []
             do {
                 try await m.saveToPreferences()
                 try await m.loadFromPreferences()   // required before starting
