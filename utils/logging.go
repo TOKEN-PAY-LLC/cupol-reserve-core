@@ -171,17 +171,19 @@ func emit(message string) {
 // Infof always logs, regardless of debug level. Used for user-facing status
 // lines (e.g. cups room open/close) that must be visible without --debug.
 //
-// The line also goes to the log sink, so an embedding app (the Android log
-// screen, the iOS ring buffer) shows the same status lines as the CLI.
+// With a log sink set (an embedding app: the Android and iOS bridges) the
+// line goes there, so the app's log screen shows the same status lines as
+// the CLI's output; otherwise to the standard log.
 func Infof(format string, args ...interface{}) {
 	message := fmt.Sprintf(format, args...)
-	log.Output(2, message)
 	logSinkMu.RLock()
 	sink := logSink
 	logSinkMu.RUnlock()
 	if sink != nil {
 		sink(message)
+		return
 	}
+	log.Output(2, message)
 }
 
 // throttle remembers when each Throttled key last fired.

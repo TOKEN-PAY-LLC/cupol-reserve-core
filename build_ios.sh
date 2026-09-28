@@ -36,12 +36,18 @@ export CGO_LDFLAGS="-isysroot $SDK_PATH -arch arm64 -miphoneos-version-min=13.0"
 echo "Building for iOS (arm64)..."
 
 # Build static library
-if go build \
+# The iOS C API lives in mobile/ios, on package mobile: the same Session,
+# context rule, codec and link handling as the Android library. An app
+# that links this checkout as a submodule gets exactly this core.
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+OUT="$ROOT/$OUTPUT_DIR/$LIBRARY_NAME.a"
+if (cd "$ROOT/mobile" && go build \
     -buildmode=c-archive \
+    -tags ios \
     -ldflags="-w" \
     -trimpath \
-    -o "$OUTPUT_DIR/$LIBRARY_NAME.a" \
-    . ; then
+    -o "$OUT" \
+    ./ios) ; then
     
     # Header liboflux.h is generated automatically by cgo from //export directives.
     

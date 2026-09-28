@@ -10,6 +10,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"openflux/transport"
 	"openflux/transport/cupsonline"
@@ -45,6 +46,20 @@ type packetClient struct {
 	transport transport.Transport
 	packets   [][]byte
 	logs      []string
+	// arrived is signalled when a packet is queued, for ReadTimeout.
+	arrived chan struct{}
+}
+
+// lowMemory selects the phone resource profile for the carriers of the
+// next start (see SetLowMemory).
+var lowMemory atomic.Bool
+
+// SetLowMemory picks the resource profile for the next Start*: on, the
+// carriers use small queues and buffers (Volga's slim profile) - what an
+// iOS Network Extension (50 MB for the whole process) needs. The wire
+// format is the same either way.
+func SetLowMemory(on bool) {
+	lowMemory.Store(on)
 }
 
 func appendLog(message string) {
@@ -90,6 +105,9 @@ func startPacket(build func() (transport.Transport, error)) string {
 	client.running = true
 	client.packets = nil
 	client.logs = nil
+	if client.arrived == nil {
+		client.arrived = make(chan struct{}, 1)
+	}
 	client.mu.Unlock()
 
 	utils.SetLevel(int(debugLevel.Load()))
@@ -120,7 +138,12 @@ func startPacket(build func() (transport.Transport, error)) string {
 			client.packets = client.packets[1:]
 		}
 		client.packets = append(client.packets, packet)
+		arrived := client.arrived
 		client.mu.Unlock()
+		select {
+		case arrived <- struct{}{}:
+		default:
+		}
 	})
 	if err := trans.Start(); err != nil {
 		return fail(err)
@@ -207,10 +230,16 @@ func newRawTransport(typ, url string, params map[string]interface{}, config tran
 		v, _ := params[key].(string)
 		return v
 	}
+	if lowMemory.Load() {
+		config.MaxQueueSize = 512
+	}
 	switch typ {
 	case "", "yandex":
 		return yandex.NewYandexDocsTransport(url, config), nil
 	case "vyandex":
+		if lowMemory.Load() {
+			return yandex.NewYandexVolgaTransportWithConfig(url, config, yandex.SlimVolgaConfig()), nil
+		}
 		return yandex.NewYandexVolgaTransport(url, config), nil
 	case "boards":
 		return yandex.NewBoardsTransport(url, config), nil
@@ -290,6 +319,28 @@ func Read() []byte {
 	packet := client.packets[0]
 	client.packets = client.packets[1:]
 	return packet
+}
+
+// ReadTimeout is Read that waits up to timeoutMs for a packet, for callers
+// that block on the tunnel (the iOS packet flow) instead of polling.
+func ReadTimeout(timeoutMs int) []byte {
+	if p := Read(); p != nil {
+		return p
+	}
+	client.mu.Lock()
+	arrived := client.arrived
+	client.mu.Unlock()
+	if arrived == nil {
+		return nil
+	}
+	timer := time.NewTimer(time.Duration(timeoutMs) * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-arrived:
+		return Read()
+	case <-timer.C:
+		return nil
+	}
 }
 
 // ReadLogs returns and clears the pending log lines.

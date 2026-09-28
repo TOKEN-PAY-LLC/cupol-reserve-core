@@ -3,6 +3,7 @@ package mobile
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net"
 	"sort"
 
@@ -119,4 +120,43 @@ func exitShareSession(specsJSON, secret string) *share.Config {
 		c.Transports = append(c.Transports, t)
 	}
 	return c
+}
+
+// ShareSessionSpecs turns an openflux:// link into the profile StartSession
+// (and StartSessionProxy / StartSessionExit) takes: {"context":...,
+// "transports":[{name,type,url,priority,params}]}, with the link's own
+// context and carrier names, so an app does not have to interpret the link
+// itself (and cannot drift from the other clients doing so). A one-carrier
+// link works there too: the Session speaks classic to a classic node.
+func ShareSessionSpecs(link string) (string, error) {
+	c, err := share.Decode(link)
+	if err != nil {
+		return "", err
+	}
+	sources := make([]transport.ContextSource, len(c.Transports))
+	specs := make([]sessionSpec, 0, len(c.Transports))
+	seen := make(map[string]int)
+	for i, t := range c.Transports {
+		sources[i] = transport.ContextSource{Type: t.Type, URL: t.URL, Priority: t.Priority}
+		name := t.Name
+		if name == "" {
+			seen[t.Type]++
+			name = t.Type
+			if n := seen[t.Type]; n > 1 {
+				name = fmt.Sprintf("%s-%d", t.Type, n)
+			}
+		}
+		spec := sessionSpec{Name: name, Type: t.Type, URL: t.URL, Priority: t.Priority}
+		if t.Type == "direct" {
+			spec.URL = ""
+			spec.Params = map[string]interface{}{"dial": t.Dial}
+		}
+		specs = append(specs, spec)
+	}
+	context, _ := transport.KDFContexts(c.Context, "", sources)
+	b, err := json.Marshal(struct {
+		Context    string        `json:"context"`
+		Transports []sessionSpec `json:"transports"`
+	}{context, specs})
+	return string(b), err
 }
