@@ -55,8 +55,9 @@ func (d *frameDemux) dispatch(p []byte) {
 		return // a carrier keepalive (Volga), not a peer frame
 	}
 	if utils.Throttled("demux.classic."+d.name, 30*time.Second) {
-		utils.Infof("[SESSION] %q: the peer sends classic-mode frames (first byte 0x%02x)%s, but this side runs a strict Session: "+
-			"start the peer as a Session (Session profile / --transports) or run this side without --negotiate",
+		utils.Infof("[SESSION] %q: the peer sends classic-mode frames (first byte 0x%02x)%s, but this side serves Session peers only "+
+			"(--negotiate, --transports, .conf transports, a wizard node): update the peer to a build on this core, give it a Session "+
+			"profile, or run this side classic (--transport=X with a key), which serves both",
 			d.name, p[0], classicFrameKind(p[0]))
 	}
 }
