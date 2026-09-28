@@ -7,6 +7,7 @@ import (
 	"sort"
 
 	"openflux/share"
+	"openflux/transport"
 )
 
 // ShareQRPNG renders link as a size x size QR code PNG for the app to show.
@@ -71,13 +72,19 @@ func ExitShareLink(host, name string) (string, error) {
 }
 
 // exitShareClassic describes a classic single-transport exit to clients.
+// The link stays classic (older clients read it too; updated ones upgrade
+// to a Session on their own), except for direct, which a link can only
+// carry as a Session.
 func exitShareClassic(transportType, documentURL, secret, codec string) *share.Config {
-	c := &share.Config{
-		Secret:     secret,
-		Context:    classicContext(documentURL),
-		Transports: []share.Transport{{Type: transportType, URL: documentURL}},
+	context, _ := transport.KDFContexts("", documentURL, []transport.ContextSource{{Type: transportType, URL: documentURL, Priority: 100}})
+	t := share.Transport{Type: transportType, URL: documentURL}
+	c := &share.Config{Secret: secret, Context: context}
+	if transportType == "direct" {
+		t = share.Transport{Type: "direct", Dial: documentURL}
+		c.Negotiate = true
 	}
-	if codec == "legacy" {
+	c.Transports = []share.Transport{t}
+	if codec == transport.CodecLegacy {
 		c.Codec = codec
 	}
 	return c
@@ -87,7 +94,7 @@ func exitShareClassic(transportType, documentURL, secret, codec string) *share.C
 // transports and context; direct keeps the listen address, whose host is
 // replaced in ExitShareLink. MAX is left out (per-account token).
 func exitShareSession(specsJSON, secret string) *share.Config {
-	specs, context, err := parseSessionSpecs(specsJSON)
+	specs, context, _, err := parseSessionSpecs(specsJSON)
 	if err != nil {
 		return nil
 	}
@@ -112,14 +119,4 @@ func exitShareSession(specsJSON, secret string) *share.Config {
 		c.Transports = append(c.Transports, t)
 	}
 	return c
-}
-
-// classicContext is the classic mode's encryption context, as the core
-// derives it for --transport with --url: the document URL, or "http://#"
-// when there is none (oneme, direct).
-func classicContext(documentURL string) string {
-	if documentURL == "" {
-		return placeholderURL
-	}
-	return documentURL
 }

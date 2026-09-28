@@ -4,6 +4,7 @@
 package mobile
 
 import (
+	"encoding/json"
 	"fmt"
 	"strconv"
 	"strings"
@@ -135,23 +136,41 @@ func validateClassic(transportType, documentURL, encryptionSecret string) string
 	if transportType != "oneme" && documentURL == "" {
 		return "Ссылка на документ не указана"
 	}
-	if encryptionSecret != "" && len(encryptionSecret) < 16 {
-		return "Ключ шифрования должен содержать не менее 16 символов"
+	if encryptionSecret != "" && utils.SecretChars(encryptionSecret) < utils.MinSecretChars {
+		return fmt.Sprintf("Ключ шифрования должен содержать не менее %d символов", utils.MinSecretChars)
 	}
 	return ""
 }
 
-// classicTransport builds the single-transport stack: carrier, codec and
-// optional encryption, the same layering as the CLI without --negotiate.
-// exit selects the exit node's side (the phone as the exit).
+// classicTransport builds a classic single-transport profile (the CLI's
+// --transport=X). exit selects the exit node's side (the phone as the exit).
+//
+// With a key it is a Session with the classic layering next to it, as the
+// CLI does: the client speaks classic until the exit answers the Session
+// handshake, then switches (so a classic profile works against every node,
+// old and new); a classic exit serves both kinds of client. Without a key
+// only classic is possible. Either way the codec is the preferred framing,
+// not a requirement: both are accepted and the other one is tried when the
+// peer stays silent.
 func classicTransport(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid string, exit bool) (transport.Transport, error) {
 	if transportType == "" {
 		transportType = "yandex"
 	}
 	appendLog(fmt.Sprintf("[ANDROID] Запуск транспорта %s", transportType))
+	params := classicParams(transportType, documentURL, maxToken, maxUid)
+	if encryptionSecret != "" {
+		specs, err := json.Marshal([]sessionSpec{{
+			Name: transportType, Type: transportType, URL: documentURL, Priority: 100, Params: params,
+		}})
+		if err != nil {
+			return nil, err
+		}
+		t, _, err := buildSessionWith(string(specs), encryptionSecret, exit, sessionOptions{classic: true, codec: codec})
+		return t, err
+	}
+
 	config := transport.DefaultConfig()
-	inner, err := newRawTransport(transportType, documentURL,
-		map[string]interface{}{"token": maxToken, "uid": maxUid}, config, exit)
+	inner, err := newRawTransport(transportType, documentURL, params, config, exit)
 	if err != nil {
 		return nil, err
 	}
@@ -160,30 +179,23 @@ func classicTransport(transportType, documentURL, encryptionSecret, codec, maxTo
 	if exit {
 		addExitRoom(transportType, inner)
 	}
+	// The codec sits under the (absent) encryption layer; see
+	// transport.CodecTransport for how the framing is agreed on.
+	inner = transport.NewCodecTransport(inner, codec, !exit)
+	appendLog("[ANDROID] Шифрование транспорта отключено (ключ не задан): узел с ключом с этим профилем не заговорит")
+	return inner, nil
+}
 
-	// App-layer codec, same as the CLI's --codec flag. Both peers must use
-	// the same one. Applied before encryption so it compresses plaintext
-	// rather than ciphertext.
-	if codec == "legacy" {
-		inner = transport.NewCompressedTransport(inner)
-	} else {
-		inner = transport.NewBatchedTransport(inner)
+// classicParams are the carrier parameters of a classic profile: the MAX
+// token and uid, or for direct the address, dialled by a client and
+// listened on by an exit.
+func classicParams(transportType, documentURL, maxToken, maxUid string) map[string]interface{} {
+	params := map[string]interface{}{"token": maxToken, "uid": maxUid}
+	if transportType == "direct" {
+		params["dial"] = documentURL
+		params["listen"] = documentURL
 	}
-
-	if encryptionSecret == "" {
-		appendLog("[ANDROID] Шифрование транспорта отключено (ключ не задан)")
-		return inner, nil
-	}
-	// Same context as the core: the document URL, or "http://#" when there
-	// isn't one (oneme, direct). Both peers must derive the same context or
-	// the encrypted channel just won't work.
-	encrypted, err := transport.NewEncryptedTransport(inner, encryptionSecret,
-		classicContext(documentURL), exit)
-	if err != nil {
-		return nil, err
-	}
-	appendLog("[ANDROID] Шифрование транспорта: AES-256-GCM включено")
-	return encrypted, nil
+	return params
 }
 
 // newRawTransport builds one carrier, like the CLI's transportFactory.
