@@ -57,7 +57,8 @@ func Read(link string) Result {
 // same configuration gives the same link on every client:
 //
 //   - addresses lose surrounding spaces;
-//   - the default codec ("batched") is left out;
+//   - the default codec ("batched") is left out, and so is the priority
+//     of a lone carrier (there is nothing to rank it against);
 //   - an encrypted link always names its context: the one given, else the
 //     one both peers derive (transport.KDFContexts); a link without a
 //     secret carries none, there is nothing to derive.
@@ -79,6 +80,9 @@ func Make(c Config) Result {
 			t.Name = ""
 		}
 		ts[i] = t
+	}
+	if len(ts) == 1 {
+		ts[0].Priority = 0
 	}
 	c.Transports = ts
 	switch {

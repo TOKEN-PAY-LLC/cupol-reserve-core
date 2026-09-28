@@ -101,6 +101,14 @@ func TestMakeIsCanonical(t *testing.T) {
 	if got := Make(spelled); got.Link != want.Link {
 		t.Errorf("spelled differently, linked differently:\n%s\n%s", got.Link, want.Link)
 	}
+	// A lone carrier is not ranked: apps that keep a priority and apps that
+	// do not export the same link.
+	lone := Config{Secret: key, Transports: []Transport{{Type: "mailru", URL: "https://cloud.mail.ru/public/x", Priority: 100}}}
+	unranked := lone
+	unranked.Transports = []Transport{{Type: "mailru", URL: "https://cloud.mail.ru/public/x"}}
+	if a, b := Make(lone), Make(unranked); a.Link != b.Link || a.Config.Transports[0].Priority != 0 {
+		t.Errorf("lone carrier: %+v vs %+v", a, b)
+	}
 	back := Read(want.Link)
 	if !reflect.DeepEqual(back.Config, want.Config) || back.Context != want.Context {
 		t.Errorf("read back %+v, made %+v", back.Config, want.Config)
