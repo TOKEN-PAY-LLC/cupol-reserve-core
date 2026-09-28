@@ -770,14 +770,19 @@ func (s *Session) classicTargetLocked() *transportLink {
 	return nil
 }
 
-// sessionHeardLocked reports whether the Session peer was heard on some
-// carrier within linkTimeout. Caller holds s.mu.
-func (s *Session) sessionHeardLocked() bool {
+// sessionActiveLocked reports whether the Session client was heard
+// recently enough that a classic client must not take the exit's replies
+// from it: a live client sends a keepalive at least every
+// keepaliveInterval, so half that again covers one lost. A client that
+// went away yields to a classic one after that, not after linkTimeout.
+// Caller holds s.mu.
+func (s *Session) sessionActiveLocked() bool {
 	if !s.ready {
 		return false
 	}
+	window := s.keepaliveInterval * 3 / 2
 	for _, l := range s.links {
-		if s.heardLocked(l) {
+		if s.connectedLocked(l) && time.Since(l.lastHeard) < window {
 			return true
 		}
 	}
@@ -792,7 +797,7 @@ func (s *Session) Mode() string {
 	switch {
 	case s.stopped:
 		return ""
-	case s.exit && s.classicLink != nil && !s.sessionHeardLocked():
+	case s.exit && s.classicLink != nil && !s.sessionActiveLocked():
 		return "classic"
 	case s.ready:
 		return "session"
@@ -934,7 +939,7 @@ func (s *Session) Send(p []byte) error {
 	if !s.stopped && s.classic != ClassicOff {
 		// A client whose exit has not answered the handshake, or an exit
 		// whose current client is a classic one: classic layering.
-		if l := s.classicTargetLocked(); l != nil && (!s.ready || (s.exit && !s.sessionHeardLocked())) {
+		if l := s.classicTargetLocked(); l != nil && (!s.ready || (s.exit && !s.sessionActiveLocked())) {
 			s.mu.Unlock()
 			return s.sendClassic(l, p)
 		}
@@ -1127,7 +1132,7 @@ func (s *Session) receiveClassic(link *transportLink, p []byte) {
 		return
 	}
 	if s.exit {
-		if s.sessionHeardLocked() {
+		if s.sessionActiveLocked() {
 			s.cntClassicDrop.Add(1)
 			s.mu.Unlock()
 			if utils.Throttled("session.classic.busy", 30*time.Second) {

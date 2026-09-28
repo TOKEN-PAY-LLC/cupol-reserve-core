@@ -83,11 +83,10 @@ type contextKeys struct {
 	recv    cipher.AEAD
 }
 
-// keyRing holds the keys of every candidate context of one carrier and
-// which of them this side currently sends under. Two EncryptedTransports on
-// the same carrier (a Session's and its classic fallback's) share one ring,
-// so what one learns about the peer's context the other uses too.
-type keyRing struct {
+// keyStore holds the keys of every candidate context of one carrier,
+// derived once and shared by the EncryptedTransports on it (a Session's
+// and its classic fallback's).
+type keyStore struct {
 	secret  string
 	exit    bool
 	side    string
@@ -98,12 +97,24 @@ type keyRing struct {
 	keys     []*contextKeys // [0] is the primary context
 	pending  []string       // candidates not derived yet
 	deriving bool
+}
+
+// keyRing is one EncryptedTransport's view of the store: which context it
+// sends under and what it has heard. Each pipeline searches on its own (a
+// Session's hellos going unanswered by a classic exit must not move the
+// classic pipeline off the right context); a client's pipelines tell each
+// other what they learn, since they talk to the same exit.
+type keyRing struct {
+	*keyStore
+
+	mu       sync.Mutex
 	send     int  // index into keys used for sending
 	locked   bool // the peer answered under keys[send]
 	heard    time.Time
 	started  time.Time // first send while nothing was heard
 	rotated  time.Time
 	failures uint64 // packets no candidate could open since the last success
+	siblings []*keyRing
 }
 
 // NewEncryptedTransport wraps inner with a directional AES-256-GCM stream.
@@ -117,47 +128,57 @@ func NewEncryptedTransport(inner Transport, secret, context string, exitNode boo
 	if utils.SecretChars(secret) < utils.MinSecretChars {
 		return nil, fmt.Errorf("encryption secret must contain at least %d characters", utils.MinSecretChars)
 	}
-	r := &keyRing{secret: secret, exit: exitNode, side: "CLIENT", sendDir: 0, recvDir: 1}
+	st := &keyStore{secret: secret, exit: exitNode, side: "CLIENT", sendDir: 0, recvDir: 1}
 	if exitNode {
-		r.side, r.sendDir, r.recvDir = "EXIT", 1, 0
+		st.side, st.sendDir, st.recvDir = "EXIT", 1, 0
 	}
-	k, err := r.derive(context)
+	k, err := st.derive(context)
 	if err != nil {
 		return nil, err
 	}
-	r.keys = []*contextKeys{k}
-	return &EncryptedTransport{Transport: inner, ring: r, seen: make(map[string]struct{})}, nil
+	st.keys = []*contextKeys{k}
+	return &EncryptedTransport{Transport: inner, ring: &keyRing{keyStore: st}, seen: make(map[string]struct{})}, nil
 }
 
-// SharingKeys returns an EncryptedTransport over inner that shares e's keys
-// and context state (not its replay window). Used for the classic fallback
-// path that runs next to a Session on the same carrier.
+// SharingKeys returns an EncryptedTransport over inner that shares e's
+// derived keys (not its replay window or its context search). Used for the
+// classic fallback path that runs next to a Session on the same carrier.
 func (e *EncryptedTransport) SharingKeys(inner Transport) *EncryptedTransport {
-	return &EncryptedTransport{Transport: inner, ring: e.ring, seen: make(map[string]struct{})}
+	r := &keyRing{keyStore: e.ring.keyStore}
+	if !e.ring.exit {
+		// The client's pipelines reach the same exit: what one learns
+		// about its context holds for the other. The exit's may serve
+		// different clients, so each follows its own.
+		e.ring.mu.Lock()
+		e.ring.siblings = append(e.ring.siblings, r)
+		r.siblings = []*keyRing{e.ring}
+		e.ring.mu.Unlock()
+	}
+	return &EncryptedTransport{Transport: inner, ring: r, seen: make(map[string]struct{})}
 }
 
 // SetAlternateContexts sets the contexts the peer may derive its keys from
 // instead of the primary one (see KDFContexts). They are derived only when
 // needed.
 func (e *EncryptedTransport) SetAlternateContexts(contexts []string) {
-	r := e.ring
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	st := e.ring.keyStore
+	st.mu.Lock()
+	defer st.mu.Unlock()
 	have := make(map[string]bool)
-	for _, k := range r.keys {
+	for _, k := range st.keys {
 		have[k.context] = true
 	}
-	for _, c := range r.pending {
+	for _, c := range st.pending {
 		have[c] = true
 	}
 	for _, c := range contexts {
 		if c != "" && !have[c] {
 			have[c] = true
-			r.pending = append(r.pending, c)
+			st.pending = append(st.pending, c)
 		}
 	}
-	if len(r.pending) > 0 {
-		utils.Debugf("[CRYPTO] side=%s %d alternate KDF context(s) on standby (derived on demand)", r.side, len(r.pending))
+	if len(st.pending) > 0 {
+		utils.Debugf("[CRYPTO] side=%s %d alternate KDF context(s) on standby (derived on demand)", st.side, len(st.pending))
 	}
 }
 
@@ -165,20 +186,34 @@ func (e *EncryptedTransport) SetAlternateContexts(contexts []string) {
 func (e *EncryptedTransport) Context() string {
 	r := e.ring
 	r.mu.Lock()
-	defer r.mu.Unlock()
-	return r.keys[r.send].context
+	idx := r.send
+	r.mu.Unlock()
+	return r.key(idx).context
 }
 
-func (r *keyRing) derive(context string) (*contextKeys, error) {
+// snapshot returns the derived keys and whether candidates are pending.
+func (st *keyStore) snapshot() ([]*contextKeys, bool) {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return append([]*contextKeys(nil), st.keys...), len(st.pending) > 0
+}
+
+func (st *keyStore) key(i int) *contextKeys {
+	st.mu.Lock()
+	defer st.mu.Unlock()
+	return st.keys[i]
+}
+
+func (st *keyStore) derive(context string) (*contextKeys, error) {
 	salt := sha256.Sum256([]byte("OpenFlux encrypted transport v1\x00" + context))
-	master, err := scrypt.Key([]byte(r.secret), salt[:], 32768, 8, 1, 32)
+	master, err := scrypt.Key([]byte(st.secret), salt[:], 32768, 8, 1, 32)
 	if err != nil {
 		return nil, fmt.Errorf("derive encryption key: %w", err)
 	}
 	clientToExit := deriveDirectionalKey(master, "client-to-exit")
 	exitToClient := deriveDirectionalKey(master, "exit-to-client")
 	sendKey, receiveKey := clientToExit, exitToClient
-	if r.exit {
+	if st.exit {
 		sendKey, receiveKey = exitToClient, clientToExit
 	}
 	send, err := newGCM(sendKey)
@@ -196,7 +231,7 @@ func (r *keyRing) derive(context string) (*contextKeys, error) {
 	// the secret itself: that would let anyone with the log test guesses
 	// without paying for scrypt. The detailed dump is --sensitive only.
 	utils.Debugf("[KEYDUMP] digest side=%s context=%q contextSHA256=%s masterSHA256=%s c2eSHA256=%s e2cSHA256=%s",
-		r.side, context,
+		st.side, context,
 		utils.Sha256Short([]byte(context)),
 		utils.Sha256Short(master),
 		utils.Sha256Short(clientToExit),
@@ -204,17 +239,17 @@ func (r *keyRing) derive(context string) (*contextKeys, error) {
 	)
 	if utils.Sensitive() {
 		utils.Debugf("[KEYDUMP] ============================================================")
-		utils.Debugf("[KEYDUMP] side=%s", r.side)
-		utils.Debugf("[KEYDUMP] secretLen=%d", len(r.secret))
-		utils.Debugf("[KEYDUMP] secretSHA256=%s", utils.Sha256Hex([]byte(r.secret)))
-		utils.Debugf("[KEYDUMP] secretHex(first 32)=%s", hex.EncodeToString([]byte(r.secret)[:minInt(len(r.secret), 32)]))
+		utils.Debugf("[KEYDUMP] side=%s", st.side)
+		utils.Debugf("[KEYDUMP] secretLen=%d", len(st.secret))
+		utils.Debugf("[KEYDUMP] secretSHA256=%s", utils.Sha256Hex([]byte(st.secret)))
+		utils.Debugf("[KEYDUMP] secretHex(first 32)=%s", hex.EncodeToString([]byte(st.secret)[:minInt(len(st.secret), 32)]))
 		utils.Debugf("[KEYDUMP] context=%q", context)
 		utils.Debugf("[KEYDUMP] contextSHA256=%s", utils.Sha256Hex([]byte(context)))
 		utils.Debugf("[KEYDUMP] salt=%s", hex.EncodeToString(salt[:]))
 		utils.Debugf("[KEYDUMP] master=%s", hex.EncodeToString(master))
 		utils.Debugf("[KEYDUMP] client->exit=%s", hex.EncodeToString(clientToExit))
 		utils.Debugf("[KEYDUMP] exit->client=%s", hex.EncodeToString(exitToClient))
-		utils.Debugf("[KEYDUMP] sendDir=%d recvDir=%d", r.sendDir, r.recvDir)
+		utils.Debugf("[KEYDUMP] sendDir=%d recvDir=%d", st.sendDir, st.recvDir)
 		utils.Debugf("[KEYDUMP] sendKey=%s", hex.EncodeToString(sendKey))
 		utils.Debugf("[KEYDUMP] recvKey=%s", hex.EncodeToString(receiveKey))
 		utils.Debugf("[KEYDUMP] ============================================================")
@@ -224,39 +259,39 @@ func (r *keyRing) derive(context string) (*contextKeys, error) {
 
 // deriveMore derives the pending candidates in the background, one at a
 // time (each scrypt run takes 32 MiB).
-func (r *keyRing) deriveMore() {
-	r.mu.Lock()
-	if r.deriving || len(r.pending) == 0 {
-		r.mu.Unlock()
+func (st *keyStore) deriveMore() {
+	st.mu.Lock()
+	if st.deriving || len(st.pending) == 0 {
+		st.mu.Unlock()
 		return
 	}
-	r.deriving = true
-	r.mu.Unlock()
+	st.deriving = true
+	st.mu.Unlock()
 	utils.SafeGo("crypto.deriveAlternates", func() {
 		defer func() {
-			r.mu.Lock()
-			r.deriving = false
-			r.mu.Unlock()
+			st.mu.Lock()
+			st.deriving = false
+			st.mu.Unlock()
 		}()
 		for {
-			r.mu.Lock()
-			if len(r.pending) == 0 {
-				r.mu.Unlock()
+			st.mu.Lock()
+			if len(st.pending) == 0 {
+				st.mu.Unlock()
 				return
 			}
-			c := r.pending[0]
-			r.pending = r.pending[1:]
-			r.mu.Unlock()
-			k, err := r.derive(c)
+			c := st.pending[0]
+			st.pending = st.pending[1:]
+			st.mu.Unlock()
+			k, err := st.derive(c)
 			if err != nil {
 				utils.Debugf("[CRYPTO] derive alternate context %q: %v", c, err)
 				continue
 			}
-			r.mu.Lock()
-			r.keys = append(r.keys, k)
-			n := len(r.keys)
-			r.mu.Unlock()
-			utils.Debugf("[CRYPTO] side=%s alternate KDF context #%d ready: %q", r.side, n-1, c)
+			st.mu.Lock()
+			st.keys = append(st.keys, k)
+			n := len(st.keys)
+			st.mu.Unlock()
+			utils.Debugf("[CRYPTO] side=%s alternate KDF context #%d ready: %q", st.side, n-1, c)
 		}
 	})
 }
@@ -266,6 +301,7 @@ func (r *keyRing) deriveMore() {
 // contextRotateEvery; an exit answers under the context the client last
 // used.
 func (r *keyRing) sendKeys() *contextKeys {
+	keys, pending := r.snapshot()
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	now := time.Now()
@@ -275,35 +311,34 @@ func (r *keyRing) sendKeys() *contextKeys {
 			r.started, r.rotated = time.Time{}, time.Time{}
 			utils.Debugf("[CRYPTO] side=%s peer silent for %v: will try the other KDF contexts again", r.side, contextUnlockAfter)
 		}
-		if !r.locked && (len(r.keys) > 1 || len(r.pending) > 0) {
+		if !r.locked && (len(keys) > 1 || pending) {
 			if r.started.IsZero() {
 				r.started, r.rotated = now, now
 			} else if now.Sub(r.rotated) >= contextRotateEvery && now.Sub(r.started) >= contextFirstRotate {
 				r.rotated = now
-				if len(r.pending) > 0 && !r.deriving {
+				if pending {
 					go r.deriveMore()
 				}
-				if len(r.keys) > 1 {
+				if len(keys) > 1 {
 					prev := r.send
-					r.send = (r.send + 1) % len(r.keys)
+					r.send = (r.send + 1) % len(keys)
 					if utils.Throttled("crypto.rotate."+r.side, 10*time.Second) {
-						utils.Infof("[CRYPTO] no answer from the peer under KDF context %q for %v; trying %q (%d/%d)",
-							r.keys[prev].context, contextRotateEvery, r.keys[r.send].context, r.send+1, len(r.keys)+len(r.pending))
+						utils.Infof("[CRYPTO] no answer from the peer under KDF context %q for %v; trying %q",
+							keys[prev].context, contextRotateEvery, keys[r.send].context)
 					}
 				}
 			}
 		}
 	}
-	return r.keys[r.send]
+	return keys[r.send]
 }
 
 // open tries every derived context, the one in use first. It reports the
 // plaintext and the index of the context that opened the packet.
 func (r *keyRing) open(nonce, ciphertext, header []byte) ([]byte, int, error) {
+	keys, pending := r.snapshot()
 	r.mu.Lock()
-	keys := append([]*contextKeys(nil), r.keys...)
 	first := r.send
-	pending := len(r.pending) > 0
 	r.mu.Unlock()
 
 	plaintext, err := keys[first].recv.Open(nil, nonce, ciphertext, header)
@@ -324,19 +359,36 @@ func (r *keyRing) open(nonce, ciphertext, header []byte) ([]byte, int, error) {
 	return nil, -1, err
 }
 
-// accepted records that the peer spoke under keys[idx].
+// accepted records that the peer spoke under keys[idx], and tells a
+// client's other pipeline.
 func (r *keyRing) accepted(idx int) {
 	r.mu.Lock()
+	siblings := r.siblings
+	r.mu.Unlock()
+	r.adopt(idx, true)
+	for _, s := range siblings {
+		s.adopt(idx, false)
+	}
+}
+
+func (r *keyRing) adopt(idx int, heard bool) {
+	ctx := r.key(idx).context
+	primary := r.key(0).context
+	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.heard = time.Now()
-	r.failures = 0
+	if heard {
+		r.heard = time.Now()
+		r.failures = 0
+	}
 	if idx == r.send && (r.locked || r.exit) {
 		return
 	}
-	prev := r.keys[r.send].context
+	prev := r.key(r.send).context
 	r.send = idx
 	r.locked = true
-	ctx := r.keys[idx].context
+	if !heard {
+		return
+	}
 	switch {
 	case prev == ctx:
 		utils.Debugf("[CRYPTO] side=%s peer confirmed KDF context %q", r.side, ctx)
@@ -344,22 +396,20 @@ func (r *keyRing) accepted(idx int) {
 		utils.Debugf("[CRYPTO] side=%s peer is back on the primary KDF context %q", r.side, ctx)
 	case utils.Throttled("crypto.adopt."+r.side, 10*time.Second):
 		utils.Infof("[CRYPTO] peer derives its keys from KDF context %q, not %q as this side does: switched to it (both sides should be updated to the same core)",
-			ctx, r.keys[0].context)
+			ctx, primary)
 	}
 }
 
 // failed counts a packet no candidate context could open and explains the
 // likely cause now and then.
 func (r *keyRing) failed() {
+	keys, pending := r.snapshot()
 	r.mu.Lock()
 	r.failures++
 	n := r.failures
-	tried := len(r.keys)
-	pending := len(r.pending)
-	primary := r.keys[0].context
 	heard := !r.heard.IsZero()
 	r.mu.Unlock()
-	if n < 3 || pending > 0 || !utils.Throttled("crypto.fail."+r.side, 30*time.Second) {
+	if n < 3 || pending || !utils.Throttled("crypto.fail."+r.side, 30*time.Second) {
 		return
 	}
 	if heard {
@@ -367,7 +417,7 @@ func (r *keyRing) failed() {
 		return
 	}
 	utils.Infof("[CRYPTO] %d packets from the peer failed authentication under all %d KDF contexts tried (primary %q, sha256 %s): the encryption key differs from the peer's",
-		n, tried, primary, utils.Sha256Short([]byte(primary)))
+		n, len(keys), keys[0].context, utils.Sha256Short([]byte(keys[0].context)))
 }
 
 func deriveDirectionalKey(master []byte, label string) []byte {
