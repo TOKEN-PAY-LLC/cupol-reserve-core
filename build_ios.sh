@@ -3,6 +3,10 @@ set -e
 
 OUTPUT_DIR="output/ios"
 LIBRARY_NAME="liboflux"
+# Paths are this checkout's, whatever the caller's directory: an app that
+# links the core as a submodule runs core/build_ios.sh from its own root.
+ROOT="$(cd "$(dirname "$0")" && pwd)"
+OUT="$ROOT/$OUTPUT_DIR/$LIBRARY_NAME.a"
 
 # Paths configuration
 XCODE_PATH="${XCODE_PATH:-/Applications/Xcode.app}"
@@ -10,7 +14,7 @@ DEVELOPER_DIR="$XCODE_PATH/Contents/Developer"
 SDK_PATH="$DEVELOPER_DIR/Platforms/iPhoneOS.platform/Developer/SDKs/iPhoneOS.sdk"
 CLANG="$DEVELOPER_DIR/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang"
 
-mkdir -p "$OUTPUT_DIR"
+mkdir -p "$ROOT/$OUTPUT_DIR"
 
 # Verify paths
 if [ ! -d "$SDK_PATH" ]; then
@@ -39,8 +43,6 @@ echo "Building for iOS (arm64)..."
 # The iOS C API lives in mobile/ios, on package mobile: the same Session,
 # context rule, codec and link handling as the Android library. An app
 # that links this checkout as a submodule gets exactly this core.
-ROOT="$(cd "$(dirname "$0")" && pwd)"
-OUT="$ROOT/$OUTPUT_DIR/$LIBRARY_NAME.a"
 if (cd "$ROOT/mobile" && go build \
     -buildmode=c-archive \
     -tags ios \
@@ -51,8 +53,8 @@ if (cd "$ROOT/mobile" && go build \
     
     # Header liboflux.h is generated automatically by cgo from //export directives.
     
-    echo "Build complete: $OUTPUT_DIR/$LIBRARY_NAME.a"
-    ls -lh "$OUTPUT_DIR/$LIBRARY_NAME.a"
+    echo "Build complete: $OUT"
+    ls -lh "$OUT"
     
 else
     echo "Build failed"
