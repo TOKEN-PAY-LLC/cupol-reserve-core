@@ -64,9 +64,9 @@ jobs:
           docker exec vds sh -c 'systemctl --version | head -n 1; cat /etc/os-release | grep PRETTY'
           docker exec vds sh -c 'systemctl is-active sshd 2>/dev/null || systemctl is-active ssh'
           # The core the test expects already installed (see TestInstallOnVDS).
-          docker exec vds mkdir -p /opt/openflux-node/bin
-          docker cp "$RUNNER_TEMP/core" vds:/opt/openflux-node/bin/openflux-node-v1.0.1
-          docker exec vds sh -c 'chmod 0755 /opt/openflux-node /opt/openflux-node/bin /opt/openflux-node/bin/openflux-node-v1.0.1 && ln -sfn openflux-node-v1.0.1 /opt/openflux-node/bin/openflux'
+          docker exec vds mkdir -p /opt/cupol-reserve-node/bin
+          docker cp "$RUNNER_TEMP/core" vds:/opt/cupol-reserve-node/bin/openflux-node-v1.0.1
+          docker exec vds sh -c 'chmod 0755 /opt/cupol-reserve-node /opt/cupol-reserve-node/bin /opt/cupol-reserve-node/bin/openflux-node-v1.0.1 && ln -sfn openflux-node-v1.0.1 /opt/cupol-reserve-node/bin/openflux'
           cp "$RUNNER_TEMP/core" core.bin
 
       - name: TestInstallOnVDS
@@ -84,6 +84,6 @@ jobs:
       - name: VDS logs
         if: failure()
         run: |
-          docker exec vds sh -c 'journalctl --no-pager -n 200 -u "openflux-node*" ; systemctl list-units --all "openflux*" --no-pager' || true
+          docker exec vds sh -c 'journalctl --no-pager -n 200 -u "cupol-reserve-node*" ; systemctl list-units --all "cupol-reserve*" --no-pager' || true
           docker exec vds sh -c 'journalctl --no-pager -n 60 -u sshd -u ssh; ls -l /etc/pam.d' || true
           docker exec vds sh -c 'sshd -T | grep -Ei "^(permitrootlogin|passwordauthentication|usepam|kbdinteractive|authenticationmethods)"; head -n 5 /etc/ssh/sshd_config; ls -la /etc/ssh/sshd_config.d; cut -c1-16 /etc/shadow | grep -E "^(root|deploy):"; ls -l /etc/shadow; grep -E "^Cap(Eff|Bnd)" /proc/$(pgrep -o sshd)/status; ls -l /usr/sbin/unix_chkpwd /sbin/unix_chkpwd; cat /etc/pam.d/sshd /etc/pam.d/password-auth; authselect current' || true

@@ -22,7 +22,7 @@ import (
 //	OPENFLUX_TEST_ROOT_PASSWORD=...         root's password
 //	OPENFLUX_TEST_USER=deploy:...           a sudoer that needs a password
 //	OPENFLUX_TEST_CORE_SHA=...              sha256 of the core preinstalled
-//	                                        as /opt/openflux-node/bin/openflux-<ver>
+//	                                        as /opt/cupol-reserve-node/bin/openflux-<ver>
 //	OPENFLUX_TEST_DOC=https://docs.yandex.ru/edit/d/...
 //	OPENFLUX_TEST_PINNED=1                  use the real pinned script and
 //	                                        release core from GitHub instead
@@ -111,7 +111,7 @@ func TestInstallOnVDS(t *testing.T) {
 	}
 	// A core some other installer left, named like a newer release of this
 	// repository (an old fork's node-v1.4.0), must not be kept.
-	if _, _, err := c.run("cd /opt/openflux-node/bin && cp openflux-node-v1.0.1 openflux-node-v1.4.0 && ln -sfn openflux-node-v1.4.0 openflux", nil); err != nil {
+	if _, _, err := c.run("cd /opt/cupol-reserve-node/bin && cp openflux-node-v1.0.1 openflux-node-v1.4.0 && ln -sfn openflux-node-v1.4.0 openflux", nil); err != nil {
 		t.Fatal(err)
 	}
 	c.Close()
@@ -161,7 +161,7 @@ func TestInstallOnVDS(t *testing.T) {
 	if out, _, _ := c.run("ls /tmp/openflux-node-conf.* 2>/dev/null | wc -l", nil); strings.TrimSpace(string(out)) != "0" {
 		t.Fatalf("config temp file left behind: %s", out)
 	}
-	if out, _, _ := c.run("systemctl is-active openflux-node@"+id, nil); strings.TrimSpace(string(out)) != "active" {
+	if out, _, _ := c.run("systemctl is-active cupol-reserve-node@"+id, nil); strings.TrimSpace(string(out)) != "active" {
 		t.Fatalf("node not active: %s", out)
 	}
 	if out, _, _ := c.run("ps -eo args | grep -c '[o]penflux --config'", nil); strings.TrimSpace(string(out)) == "0" {
@@ -193,7 +193,7 @@ func TestInstallOnVDS(t *testing.T) {
 		out, errb, _ := c.run("sudo -S -p '' "+cmd, []byte(userPass+"\n"))
 		return strings.TrimSpace(string(out) + string(errb))
 	}
-	conf := sudo("cat /etc/openflux-node/" + id + "/node.conf")
+	conf := sudo("cat /etc/cupol-reserve-node/" + id + "/node.conf")
 	for _, want := range []string{
 		"URL = " + os.Getenv("OPENFLUX_TEST_DOC"), "[Transport vyandex]", "[Transport mailru]",
 		"URL = https://cloud.mail.ru/public/AbCd/EfGhIjKlM", "[Transport cupsonline]", "URL = WyJyb29tLTEiLCJyb29tLTIiXQ",
@@ -203,15 +203,15 @@ func TestInstallOnVDS(t *testing.T) {
 			t.Fatalf("node.conf lacks %q:\n%s", want, conf)
 		}
 	}
-	if out := sudo("systemctl is-enabled openflux-node-update.timer; test -x /opt/openflux-node/node-install.sh && echo copy"); out != "enabled\ncopy" {
+	if out := sudo("systemctl is-enabled cupol-reserve-node-update.timer; test -x /opt/cupol-reserve-node/node-install.sh && echo copy"); out != "enabled\ncopy" {
 		t.Fatalf("updater not installed: %q", out)
 	}
 	if p, err := c.Probe(); err != nil || !p.AutoUpdate {
 		t.Fatalf("probe after install: %+v %v", p, err)
 	}
 
-	update := func() string { return sudo("sh /opt/openflux-node/node-install.sh update") }
-	core := func() string { return sudo("readlink /opt/openflux-node/bin/openflux") }
+	update := func() string { return sudo("sh /opt/cupol-reserve-node/node-install.sh update") }
+	core := func() string { return sudo("readlink /opt/cupol-reserve-node/bin/openflux") }
 	if out := update(); !strings.Contains(out, `"updated":false`) || core() != "openflux-node-v1.0.1" {
 		t.Fatalf("no newer release: %s, core %s", out, core())
 	}
@@ -221,26 +221,26 @@ func TestInstallOnVDS(t *testing.T) {
 	if out := update(); !strings.Contains(out, `"updated":true`) || core() != "openflux-node-v1.1.0" {
 		t.Fatalf("update to node-v1.1.0: %s, core %s", out, core())
 	}
-	if out := sudo("systemctl is-active openflux-node@" + id); out != "active" {
+	if out := sudo("systemctl is-active cupol-reserve-node@" + id); out != "active" {
 		t.Fatalf("channel after update: %s", out)
 	}
-	if out := sudo("grep '^CORE_VERSION=' /opt/openflux-node/node-install.sh"); out != `CORE_VERSION="node-v1.1.0"` {
+	if out := sudo("grep '^CORE_VERSION=' /opt/cupol-reserve-node/node-install.sh"); out != `CORE_VERSION="node-v1.1.0"` {
 		t.Fatalf("the updater's script copy: %s", out)
 	}
 	gh.add("node-v1.2.0", gh.bad)
 	if out := update(); !strings.Contains(out, "не поднялись") || core() != "openflux-node-v1.1.0" {
 		t.Fatalf("a core that crashes must be rolled back: %s, core %s", out, core())
 	}
-	if out := sudo("systemctl is-active openflux-node@" + id); out != "active" {
+	if out := sudo("systemctl is-active cupol-reserve-node@" + id); out != "active" {
 		t.Fatalf("channel after rollback: %s", out)
 	}
 	if out := update(); !strings.Contains(out, `"skipped":"node-v1.2.0"`) {
 		t.Fatalf("a rolled back release must not be tried again: %s", out)
 	}
-	if out := sudo("sh /opt/openflux-node/node-install.sh autoupdate off; systemctl is-enabled openflux-node-update.timer"); !strings.Contains(out, `"autoupdate":false`) {
+	if out := sudo("sh /opt/cupol-reserve-node/node-install.sh autoupdate off; systemctl is-enabled cupol-reserve-node-update.timer"); !strings.Contains(out, `"autoupdate":false`) {
 		t.Fatalf("autoupdate off: %s", out)
 	}
-	if out := sudo("sh " + c.script + " autoupdate on; systemctl is-enabled openflux-node-update.timer"); !strings.HasSuffix(out, "enabled") ||
+	if out := sudo("sh " + c.script + " autoupdate on; systemctl is-enabled cupol-reserve-node-update.timer"); !strings.HasSuffix(out, "enabled") ||
 		!strings.Contains(out, `"autoupdate":true`) {
 		t.Fatalf("autoupdate on: %s", out)
 	}
@@ -264,10 +264,10 @@ func TestInstallOnVDS(t *testing.T) {
 	if err := c.Remove(id, userPass); err != nil {
 		t.Fatal(err)
 	}
-	if out, _, _ := c.run("test -e /etc/openflux-node/"+id+" && echo left", nil); strings.TrimSpace(string(out)) != "" {
+	if out, _, _ := c.run("test -e /etc/cupol-reserve-node/"+id+" && echo left", nil); strings.TrimSpace(string(out)) != "" {
 		t.Fatal("channel files left after remove")
 	}
-	if out, _, _ := c.run("test -e /etc/systemd/system/openflux-node-update.timer && echo left", nil); strings.TrimSpace(string(out)) != "" {
+	if out, _, _ := c.run("test -e /etc/systemd/system/cupol-reserve-node-update.timer && echo left", nil); strings.TrimSpace(string(out)) != "" {
 		t.Fatal("updater left after the last channel was removed")
 	}
 
@@ -286,29 +286,29 @@ func TestInstallOnVDS(t *testing.T) {
 		}
 	}
 	// systemd sets the mode (StateDirectoryMode); without StateDirectory= apply's 0750 stays.
-	if out := sudo("stat -c '%U' /var/lib/openflux-node/first"); out != "openflux-node" {
+	if out := sudo("stat -c '%U' /var/lib/cupol-reserve-node/first"); out != "cupol-reserve" {
 		t.Fatalf("state directory: %q", out)
 	}
-	if out := sudo("sh /opt/openflux-node/node-install.sh list"); !strings.Contains(out, `"channel":"first","state":"active"`) ||
+	if out := sudo("sh /opt/cupol-reserve-node/node-install.sh list"); !strings.Contains(out, `"channel":"first","state":"active"`) ||
 		!strings.Contains(out, `"channel":"second","state":"active"`) || !strings.Contains(out, `"autoupdate":true`) {
 		t.Fatalf("list: %s", out)
 	}
-	if out := sudo("sh /opt/openflux-node/node-install.sh remove first"); !strings.Contains(out, `"ok":true`) {
+	if out := sudo("sh /opt/cupol-reserve-node/node-install.sh remove first"); !strings.Contains(out, `"ok":true`) {
 		t.Fatalf("remove by name: %s", out)
 	}
-	if out := sudo(`sh -c 'test -e /etc/openflux-node/first && echo left; systemctl is-active openflux-node@first; systemctl is-active openflux-node@second'`); out != "inactive\nactive" {
+	if out := sudo(`sh -c 'test -e /etc/cupol-reserve-node/first && echo left; systemctl is-active cupol-reserve-node@first; systemctl is-active cupol-reserve-node@second'`); out != "inactive\nactive" {
 		t.Fatalf("after remove first: %q", out)
 	}
-	if out := sudo("sh /opt/openflux-node/node-install.sh remove nosuch"); !strings.Contains(out, `"ok":false`) {
+	if out := sudo("sh /opt/cupol-reserve-node/node-install.sh remove nosuch"); !strings.Contains(out, `"ok":false`) {
 		t.Fatalf("remove of a missing channel: %s", out)
 	}
-	if out := sudo("sh /opt/openflux-node/node-install.sh uninstall"); !strings.Contains(out, `"removed":["second"]`) {
+	if out := sudo("sh /opt/cupol-reserve-node/node-install.sh uninstall"); !strings.Contains(out, `"removed":["second"]`) {
 		t.Fatalf("uninstall: %s", out)
 	}
 	// sudo runs one command: the check is a script for sh.
-	left := sudo(`sh -c 'for p in /opt/openflux-node /etc/openflux-node /var/lib/openflux-node /etc/systemd/system/openflux-node@.service ` +
-		`/etc/systemd/system/openflux-node-update.timer /etc/systemd/system/openflux-node-update.service; do test -e $p && echo $p; done; ` +
-		`id openflux-node >/dev/null 2>&1 && echo user; systemctl is-active openflux-node@second; ps -eo args | grep -c "[o]penflux --config"'`)
+	left := sudo(`sh -c 'for p in /opt/cupol-reserve-node /etc/cupol-reserve-node /var/lib/cupol-reserve-node /etc/systemd/system/cupol-reserve-node@.service ` +
+		`/etc/systemd/system/cupol-reserve-node-update.timer /etc/systemd/system/cupol-reserve-node-update.service; do test -e $p && echo $p; done; ` +
+		`id cupol-reserve >/dev/null 2>&1 && echo user; systemctl is-active cupol-reserve-node@second; ps -eo args | grep -c "[o]penflux --config"'`)
 	if left != "inactive\n0" {
 		t.Fatalf("left after uninstall: %q", left)
 	}
@@ -356,7 +356,7 @@ func (f *fakeReleases) prerelease(tag string, core []byte) {
 func (f *fakeReleases) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
-	const repo = "/p1neappleXpress/OpenFlux/"
+	const repo = "/TOKEN-PAY-LLC/cupol-reserve-core/"
 	p := r.URL.Path
 	switch {
 	case p == "/repos"+repo+"releases":

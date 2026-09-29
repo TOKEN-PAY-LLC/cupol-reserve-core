@@ -87,7 +87,7 @@ func TestShareLinkCarriesTheChosenTransports(t *testing.T) {
 	want := []share.Transport{
 		{Type: "mailru", URL: testMailru, Priority: 90},
 		{Type: "cupsonline", URL: testRooms, Priority: 70},
-		{Type: "direct", Dial: "203.0.113.5:8445", Priority: 50},
+		{Type: "direct", Dial: "203.0.113.5:8445", Priority: 110},
 	}
 	if len(c.Transports) != len(want) {
 		t.Fatalf("transports: %+v", c.Transports)

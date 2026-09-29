@@ -120,7 +120,7 @@ func ContextOf(c Config) string {
 
 // NodeConfig is the configuration of a channel the node wizard sets up
 // (desktop and Android build it here, so their links are the same): the
-// Yandex document first, direct to dial (host:port) as the backup, the
+// direct to dial (host:port) first, Yandex document as the fallback, the
 // document as the context, and the channel key.
 func NodeConfig(name, documentURL, key, dial string) Config {
 	return Config{
@@ -130,7 +130,7 @@ func NodeConfig(name, documentURL, key, dial string) Config {
 		Context:   documentURL,
 		Transports: []Transport{
 			{Type: "vyandex", URL: documentURL, Priority: 100},
-			{Type: "direct", Dial: dial, Priority: 50},
+			{Type: "direct", Dial: dial, Priority: 110},
 		},
 	}
 }

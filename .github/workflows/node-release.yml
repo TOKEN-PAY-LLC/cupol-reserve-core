@@ -50,10 +50,10 @@ jobs:
         run: |
           # What the node runs: the newest released section of CHANGELOG.md.
           {
-            echo "Ядро выходной ноды для мастера «Своя нода» в OpenFlux (десктоп и Android). Хеши сверены с deploy/node-install.sh."
+            echo "Ядро выходной ноды для мастера «Своя нода» в CUPOL Reserve (десктоп и Android). Хеши сверены с deploy/node-install.sh."
             echo
             awk 'index($0, "## [")==1 { if (f) exit; if (index($0, "Unreleased") == 0) { f = 1; print "## Ядро " substr($0, 4) }; next } f' CHANGELOG.md
           } > notes.md
           gh release create "$GITHUB_REF_NAME" dist/openflux-linux-* dist/SHA256SUMS \
-            --title "OpenFlux node $GITHUB_REF_NAME" \
+            --title "CUPOL Reserve node $GITHUB_REF_NAME" \
             --notes-file notes.md

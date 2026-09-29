@@ -372,7 +372,7 @@ func NodeCreateCupsRooms() string {
 
 // NodeShareLink returns the openflux:// link of a new channel: the Session
 // profile a client needs (its carriers from transportsJSON, see
-// nodeTransports, and direct to host:port as the backup). The app saves it
+// nodeTransports, and direct to host:port as the preferred carrier). The app saves it
 // through the same import path as a scanned QR, and shows it as a QR for
 // another device. It carries the channel key.
 func NodeShareLink(name, transportsJSON, key, host string, port int) (string, error) {

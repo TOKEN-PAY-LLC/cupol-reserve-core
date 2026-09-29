@@ -13,8 +13,8 @@ import (
 	"github.com/p1neappleXpress/OpenFlux/transport"
 )
 
-// ChannelTransport is one of a channel's carriers besides direct, which
-// every channel has as the backup.
+// ChannelTransport is one of a channel's carriers besides direct. The
+// direct carrier has the highest priority; document carriers are fallback.
 type ChannelTransport struct {
 	// Type is vyandex (a Yandex document), mailru (a Mail.ru public
 	// document) or cupsonline (cups.online rooms).
@@ -27,7 +27,7 @@ type ChannelTransport struct {
 // carrier, and so what the channel's link must say too.
 var transportPriority = map[string]int{"vyandex": 100, "mailru": 90, "cupsonline": 70}
 
-const directPriority = 50
+const directPriority = 110
 
 var (
 	volgaDocURL  = regexp.MustCompile(`^https://(docs|disk)\.yandex\.(ru|com|by|kz|uz)/edit/d/[A-Za-z0-9_-]{16,200}$`)
@@ -104,9 +104,9 @@ func SessionContext(ts []ChannelTransport) string {
 	return context
 }
 
-// ShareLink is the openflux:// link of a new channel: its carriers in
-// priority order and direct to host:port as the backup. It carries the
-// channel key.
+// ShareLink is the openflux:// link of a new channel: direct to host:port is
+// preferred and its document carriers remain available as fallback. It
+// carries the channel key.
 func ShareLink(name, key, host string, port int, ts []ChannelTransport) (string, error) {
 	if host == "" || port <= 0 || port > 65535 {
 		return "", errors.New("нет адреса или порта ноды")

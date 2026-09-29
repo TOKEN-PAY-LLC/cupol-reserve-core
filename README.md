@@ -186,7 +186,7 @@ RSTs generated locally by the exit-node kernel.
   VDS download and verify a pinned, hash-checked install script, and returns
   the finished node's `openflux://` link. A channel carries any mix of a
   Yandex document, a Mail.ru public document and cups.online rooms (the
-  wizard creates them), with direct always as the backup. Optionally
+  wizard creates them), with direct preferred and document carriers as fallback. Optionally
   `openflux-node-update.timer` keeps the server's core on the newest
   `node-v*` release: every 6 hours it checks GitHub, verifies the core
   against the release's own `node-install.sh` and `SHA256SUMS`, restarts

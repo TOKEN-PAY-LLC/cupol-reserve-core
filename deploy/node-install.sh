@@ -1,23 +1,23 @@
 #!/bin/sh
-# Managed by OpenFlux node-install.sh
+# Managed by CUPOL Reserve node-install.sh
 #
-# Installs one OpenFlux exit channel on a Linux VDS. The "Своя нода" wizard
-# of the OpenFlux apps downloads this file by a pinned commit, checks
+# Installs one CUPOL Reserve exit channel on a Linux VDS. The node wizard
+# of the CUPOL Reserve apps downloads this file by a pinned commit, checks
 # its SHA-256 and runs it over SSH. Every channel is independent: its own
-# transports (a Yandex document, a Mail.ru document, cups.online rooms, and
-# always direct as the backup), key, port and systemd instance
-# (openflux-node@<channel>). Nothing outside the paths below is touched, so
-# existing services (other OpenFlux installs, Docker, VPNs) keep running.
+# transports (direct first, a Yandex document, a Mail.ru document and
+# cups.online rooms as fallback), key, port and systemd instance
+# (cupol-reserve-node@<channel>). Nothing outside the paths below is touched, so
+# existing services (other CUPOL Reserve installs, Docker, VPNs) keep running.
 #
-#   /opt/openflux-node/bin/            core binaries (from GitHub Releases)
-#   /opt/openflux-node/node-install.sh this script, for the updater
-#   /etc/openflux-node/<channel>/      node.conf, encryption-key (0640), port,
+#   /opt/cupol-reserve-node/bin/            core binaries (from GitHub Releases)
+#   /opt/cupol-reserve-node/node-install.sh this script, for the updater
+#   /etc/cupol-reserve-node/<channel>/      node.conf, encryption-key (0640), port,
 #                                      firewall; the directory is 0751 so a
 #                                      plain user's plan sees the channel and
 #                                      its port but not its secrets
-#   /var/lib/openflux-node/<channel>/  cookie store (systemd StateDirectory)
-#   /etc/systemd/system/openflux-node@.service
-#   /etc/systemd/system/openflux-node-update.{service,timer}
+#   /var/lib/cupol-reserve-node/<channel>/  cookie store (systemd StateDirectory)
+#   /etc/systemd/system/cupol-reserve-node@.service
+#   /etc/systemd/system/cupol-reserve-node-update.{service,timer}
 #                                      the core updater, when enabled
 #
 # Usage: node-install.sh probe
@@ -50,29 +50,29 @@
 set -u
 umask 077
 
-CORE_VERSION="node-v1.1.0"
-SHA_amd64="9ec36c073749c1d02ca163516ba6fc257cc624a69833fb108de65ba4400e8f41"
-SHA_arm64="b6d74ae230d9f4711cc4e03ba19d9eb7b4e3987ae6eeb45f86257743da9623ed"
-SHA_arm="77c5afa26566db77b465e26bc0bdcde55e9f2babb08b386953a3d2f769667cf8"
+CORE_VERSION="node-v1.1.1"
+SHA_amd64="8c1db6c9fa886863d4bed9c76b2cd517826781d3028fc0ab98a0c30f53504334"
+SHA_arm64="f6e062f03e2e25da8aaa8be652171fe6ea582c78e0fe23bd0b58d6ad7569ddb0"
+SHA_arm="7ce154714bdcc0a2a22d0f0a88e8f3ea114b719a36e29b48a1352b0e53918393"
 # The repository this script and its core come from: the core is one of its
 # node-v* releases, and the updater follows them (UPDATE_CONF may override
 # that with a "repo=owner/name" line).
-RELEASE_REPO="p1neappleXpress/OpenFlux"
+RELEASE_REPO="TOKEN-PAY-LLC/cupol-reserve-core"
 GITHUB_API="https://api.github.com"
 GITHUB_RAW="https://raw.githubusercontent.com"
 GITHUB_WEB="https://github.com"
 CORE_BASE="$GITHUB_WEB/$RELEASE_REPO/releases/download/$CORE_VERSION"
 
-BIN_DIR="/opt/openflux-node/bin"
-CONF_ROOT="/etc/openflux-node"
-STATE_ROOT="/var/lib/openflux-node"
-UNIT_FILE="/etc/systemd/system/openflux-node@.service"
-UPDATE_SERVICE="/etc/systemd/system/openflux-node-update.service"
-UPDATE_TIMER="/etc/systemd/system/openflux-node-update.timer"
+BIN_DIR="/opt/cupol-reserve-node/bin"
+CONF_ROOT="/etc/cupol-reserve-node"
+STATE_ROOT="/var/lib/cupol-reserve-node"
+UNIT_FILE="/etc/systemd/system/cupol-reserve-node@.service"
+UPDATE_SERVICE="/etc/systemd/system/cupol-reserve-node-update.service"
+UPDATE_TIMER="/etc/systemd/system/cupol-reserve-node-update.timer"
 UPDATE_CONF="$CONF_ROOT/update.conf"
-SELF_COPY="/opt/openflux-node/node-install.sh"
-NODE_USER="openflux-node"
-MARKER="# Managed by OpenFlux node-install.sh"
+SELF_COPY="/opt/cupol-reserve-node/node-install.sh"
+NODE_USER="cupol-reserve"
+MARKER="# Managed by CUPOL Reserve node-install.sh"
 
 # ---- output -----------------------------------------------------------------
 
@@ -219,7 +219,7 @@ core_to_use() {
 }
 
 autoupdate_on() {
-    [ -f "$UPDATE_TIMER" ] && systemctl is-enabled --quiet openflux-node-update.timer 2>/dev/null
+    [ -f "$UPDATE_TIMER" ] && systemctl is-enabled --quiet cupol-reserve-node-update.timer 2>/dev/null
 }
 
 release_repo() {
@@ -359,7 +359,7 @@ cmd_plan() {
         [ -n "$PORT" ] || fail plan "не удалось найти свободный порт"
     fi
     if [ -f "$UNIT_FILE" ] && ! grep -qF "$MARKER" "$UNIT_FILE"; then
-        fail plan "$UNIT_FILE создан не мастером OpenFlux, не трогаю его"
+        fail plan "$UNIT_FILE создан не мастером CUPOL Reserve, не трогаю его"
     fi
 
     core=$(core_to_use)
@@ -368,17 +368,17 @@ cmd_plan() {
     # The installed file counts only if it is this release of RELEASE_REPO
     # (another repository may have a release with the same number).
     if [ "$core" != "$CORE_VERSION" ] || { [ -x "$BIN_DIR/openflux-$core" ] && [ "$(sha256_of "$BIN_DIR/openflux-$core")" = "$(core_sha "$arch")" ]; }; then
-        set -- "$@" "Использовать уже установленное ядро OpenFlux $core ($RELEASE_REPO)"
+        set -- "$@" "Использовать уже установленное ядро CUPOL Reserve $core ($RELEASE_REPO)"
     else
-        set -- "$@" "Скачать ядро OpenFlux $core (linux-$arch) из релизов $RELEASE_REPO на GitHub и сверить SHA-256 в $BIN_DIR"
+        set -- "$@" "Скачать ядро CUPOL Reserve $core (linux-$arch) из релизов $RELEASE_REPO на GitHub и сверить SHA-256 в $BIN_DIR"
     fi
     set -- "$@" "Создать $CONF_ROOT/$CHANNEL: node.conf и ключ шифрования канала (права 0640)"
     [ -f "$UNIT_FILE" ] || set -- "$@" "Установить шаблон systemd $UNIT_FILE"
     names=$(transport_names)
     if [ -n "$names" ]; then
-        set -- "$@" "Запустить openflux-node@$CHANNEL: $names и direct на порту $PORT/tcp (резерв)"
+        set -- "$@" "Запустить cupol-reserve-node@$CHANNEL: direct на порту $PORT/tcp и резервные каналы $names"
     else
-        set -- "$@" "Запустить openflux-node@$CHANNEL: только direct на порту $PORT/tcp"
+        set -- "$@" "Запустить cupol-reserve-node@$CHANNEL: только direct на порту $PORT/tcp"
     fi
     case "$(firewall_kind)" in
         ufw) set -- "$@" "Разрешить входящий $PORT/tcp в ufw" ;;
@@ -387,9 +387,9 @@ cmd_plan() {
     case "$AUTOUPDATE" in
         yes)
             if autoupdate_on; then
-                set -- "$@" "Автообновление ядра уже включено на сервере (openflux-node-update.timer)"
+                set -- "$@" "Автообновление ядра уже включено на сервере (cupol-reserve-node-update.timer)"
             else
-                set -- "$@" "Включить автообновление ядра (openflux-node-update.timer): раз в 6 часов проверять релизы node-v* в $(release_repo) на GitHub, сверять SHA-256, перезапускать каналы и откатываться, если нода не поднялась"
+                set -- "$@" "Включить автообновление ядра (cupol-reserve-node-update.timer): раз в 6 часов проверять релизы node-v* в $(release_repo) на GitHub, сверять SHA-256, перезапускать каналы и откатываться, если нода не поднялась"
             fi ;;
         no)
             autoupdate_on && set -- "$@" "Выключить автообновление ядра на сервере (для всех каналов)" ;;
@@ -404,7 +404,7 @@ cmd_plan() {
 CREATED_USER=0; CREATED_UNIT=0; CREATED_BIN=0; CREATED_CONF=0; CREATED_FW=""; STARTED=0
 
 rollback() {
-    [ "$STARTED" = 1 ] && unit_stop "openflux-node@$CHANNEL"
+    [ "$STARTED" = 1 ] && unit_stop "cupol-reserve-node@$CHANNEL"
     case "$CREATED_FW" in
         ufw) ufw delete allow "$PORT/tcp" >/dev/null 2>&1 ;;
         firewalld) firewall-cmd --permanent --remove-port="$PORT/tcp" >/dev/null 2>&1 && firewall-cmd --reload >/dev/null 2>&1 ;;
@@ -425,7 +425,7 @@ apply_fail() {
 # CREATED_BIN when it downloaded, CORE_ERROR on failure.
 CORE_ERROR=""
 install_core() {
-    mkdir -p "$BIN_DIR" && chmod 0755 /opt/openflux-node "$BIN_DIR"
+    mkdir -p "$BIN_DIR" && chmod 0755 /opt/cupol-reserve-node "$BIN_DIR"
     # The updater already runs a newer release: keep it.
     [ "$(core_to_use)" = "$CORE_VERSION" ] || return 0
     core="$BIN_DIR/openflux-$CORE_VERSION"
@@ -453,7 +453,7 @@ write_unit() {
     cat > "$UNIT_FILE" <<EOF
 $MARKER
 [Unit]
-Description=OpenFlux node channel %i
+Description=CUPOL Reserve node channel %i
 After=network-online.target
 Wants=network-online.target
 
@@ -461,7 +461,7 @@ Wants=network-online.target
 Type=simple
 User=$NODE_USER
 Group=$NODE_USER
-StateDirectory=openflux-node/%i
+StateDirectory=cupol-reserve-node/%i
 # apply creates the directory too: systemd before 235 ignores StateDirectory=.
 ReadWritePaths=-$STATE_ROOT/%i
 WorkingDirectory=$STATE_ROOT/%i
@@ -498,21 +498,21 @@ install_self() {
         version_gt "$(script_core "$SELF_COPY")" "$(script_core "$1")"; then
         return 0
     fi
-    mkdir -p /opt/openflux-node && chmod 0755 /opt/openflux-node || return 1
-    tmp=$(mktemp /opt/openflux-node/.node-install.XXXXXX) || return 1
+    mkdir -p /opt/cupol-reserve-node && chmod 0755 /opt/cupol-reserve-node || return 1
+    tmp=$(mktemp /opt/cupol-reserve-node/.node-install.XXXXXX) || return 1
     if cat "$1" > "$tmp" && chmod 0755 "$tmp" && mv -f "$tmp" "$SELF_COPY"; then return 0; fi
     rm -f "$tmp"
     return 1
 }
 
-# enable_updater: openflux-node-update.timer runs "update" from the copy of
+# enable_updater: cupol-reserve-node-update.timer runs "update" from the copy of
 # this script: shortly after boot or install, then every 6 hours.
 enable_updater() {
     install_self "$0" || return 1
     cat > "$UPDATE_SERVICE" <<EOF
 $MARKER
 [Unit]
-Description=Update the OpenFlux node core to the newest node-v* release
+Description=Update the CUPOL Reserve node core to the newest node-v* release
 After=network-online.target
 Wants=network-online.target
 
@@ -523,7 +523,7 @@ EOF
     cat > "$UPDATE_TIMER" <<EOF
 $MARKER
 [Unit]
-Description=Check for a newer OpenFlux node core
+Description=Check for a newer CUPOL Reserve node core
 
 [Timer]
 OnBootSec=15min
@@ -534,11 +534,11 @@ RandomizedDelaySec=30min
 WantedBy=timers.target
 EOF
     chmod 0644 "$UPDATE_SERVICE" "$UPDATE_TIMER"
-    systemctl daemon-reload >/dev/null 2>&1 && unit_start openflux-node-update.timer
+    systemctl daemon-reload >/dev/null 2>&1 && unit_start cupol-reserve-node-update.timer
 }
 
 disable_updater() {
-    unit_stop openflux-node-update.timer
+    unit_stop cupol-reserve-node-update.timer
     for f in "$UPDATE_TIMER" "$UPDATE_SERVICE"; do
         [ -f "$f" ] && grep -qF "$MARKER" "$f" && rm -f "$f"
     done
@@ -561,7 +561,7 @@ apply_autoupdate() {
 # channel's link (provision.ShareLink).
 write_node_conf() {
     cat <<EOF
-# OpenFlux node channel $CHANNEL, written by node-install.sh
+# CUPOL Reserve node channel $CHANNEL, written by node-install.sh
 Role = exit
 Mode = l4
 EncryptionKeyFile = $CONF_ROOT/$CHANNEL/encryption-key
@@ -572,7 +572,7 @@ EOF
     [ -n "$URL" ] && printf '\n[Transport vyandex]\nType = vyandex\nPriority = 100\nURL = %s\n' "$URL"
     [ -n "$MAILRU" ] && printf '\n[Transport mailru]\nType = mailru\nPriority = 90\nURL = %s\n' "$MAILRU"
     [ -n "$CUPS" ] && printf '\n[Transport cupsonline]\nType = cupsonline\nPriority = 70\nURL = %s\n' "$CUPS"
-    printf '\n[Transport direct]\nType = direct\nPriority = 50\nListen = 0.0.0.0:%s\n' "$PORT"
+    printf '\n[Transport direct]\nType = direct\nPriority = 110\nListen = 0.0.0.0:%s\n' "$PORT"
 }
 
 cmd_apply() {
@@ -587,7 +587,7 @@ cmd_apply() {
     [ -d "$CONF_ROOT/$CHANNEL" ] && fail apply "канал $CHANNEL уже существует на сервере"
     if port_busy "$PORT" || port_claimed "$PORT"; then fail apply "порт $PORT занят"; fi
     if [ -f "$UNIT_FILE" ] && ! grep -qF "$MARKER" "$UNIT_FILE"; then
-        fail apply "$UNIT_FILE создан не мастером OpenFlux"
+        fail apply "$UNIT_FILE создан не мастером CUPOL Reserve"
     fi
 
     if ! id "$NODE_USER" >/dev/null 2>&1; then
@@ -639,12 +639,12 @@ cmd_apply() {
     esac
     [ -n "$CREATED_FW" ] && printf '%s %s\n' "$CREATED_FW" "$PORT" > "$dir/firewall"
 
-    unit_start "openflux-node@$CHANNEL" \
-        || apply_fail start "не удалось запустить openflux-node@$CHANNEL"
+    unit_start "cupol-reserve-node@$CHANNEL" \
+        || apply_fail start "не удалось запустить cupol-reserve-node@$CHANNEL"
     STARTED=1
     sleep 4
-    if ! systemctl is-active --quiet "openflux-node@$CHANNEL"; then
-        logs=$(journalctl -u "openflux-node@$CHANNEL" -n 8 -o cat --no-pager 2>/dev/null | tail -n 8)
+    if ! systemctl is-active --quiet "cupol-reserve-node@$CHANNEL"; then
+        logs=$(journalctl -u "cupol-reserve-node@$CHANNEL" -n 8 -o cat --no-pager 2>/dev/null | tail -n 8)
         apply_fail start "нода не запустилась: $logs"
     fi
     # The channel runs; the updater is extra, and its failure only shows.
@@ -657,7 +657,7 @@ cmd_apply() {
 # remove_channel CHANNEL: stops the channel, closes its firewall port and
 # deletes its config and state.
 remove_channel() {
-    unit_stop "openflux-node@$1"
+    unit_stop "cupol-reserve-node@$1"
     if [ -f "$CONF_ROOT/$1/firewall" ]; then
         read -r kind port < "$CONF_ROOT/$1/firewall"
         case "$kind" in
@@ -675,8 +675,8 @@ remove_everything() {
     disable_updater
     [ -f "$UNIT_FILE" ] && grep -qF "$MARKER" "$UNIT_FILE" && rm -f "$UNIT_FILE"
     systemctl daemon-reload >/dev/null 2>&1
-    systemctl reset-failed 'openflux-node@*' >/dev/null 2>&1
-    rm -rf /opt/openflux-node "$CONF_ROOT" "$STATE_ROOT"
+    systemctl reset-failed 'cupol-reserve-node@*' >/dev/null 2>&1
+    rm -rf /opt/cupol-reserve-node "$CONF_ROOT" "$STATE_ROOT"
     id "$NODE_USER" >/dev/null 2>&1 && userdel "$NODE_USER" >/dev/null 2>&1
     return 0
 }
@@ -707,7 +707,7 @@ cmd_uninstall() {
         remove_channel "$ch"
         set -- "$@" "$ch"
     done
-    for unit in $(systemctl list-units --all --plain --no-legend 'openflux-node@*' 2>/dev/null | awk '{print $1}'); do
+    for unit in $(systemctl list-units --all --plain --no-legend 'cupol-reserve-node@*' 2>/dev/null | awk '{print $1}'); do
         unit_stop "$unit"
     done
     remove_everything
@@ -722,7 +722,7 @@ cmd_list() {
         [ "$first" = 1 ] || printf ','
         first=0
         port=$(cat "$CONF_ROOT/$ch/port" 2>/dev/null)
-        printf '{"channel":"%s","state":"%s","port":%s}' "$ch" "$(json_escape "$(systemctl is-active "openflux-node@$ch" 2>/dev/null)")" "${port:-0}"
+        printf '{"channel":"%s","state":"%s","port":%s}' "$ch" "$(json_escape "$(systemctl is-active "cupol-reserve-node@$ch" 2>/dev/null)")" "${port:-0}"
     done
     printf ']}\n'
 }
@@ -731,14 +731,14 @@ cmd_list() {
 # running ones. Configs, keys and ports stay as they are.
 cmd_upgrade() {
     [ "$(id -u)" = 0 ] || fail upgrade "нужны права root (sudo)"
-    [ -n "$(list_channels)" ] || fail upgrade "на сервере нет каналов OpenFlux"
+    [ -n "$(list_channels)" ] || fail upgrade "на сервере нет каналов CUPOL Reserve"
     arch=$(detect_arch)
     [ -n "$arch" ] || fail upgrade "архитектура $(uname -m) не поддерживается"
     install_core "$arch" || fail upgrade "$CORE_ERROR"
     set --
     for ch in $(list_channels); do
-        if systemctl is-active --quiet "openflux-node@$ch"; then
-            systemctl restart "openflux-node@$ch" || fail upgrade "не удалось перезапустить openflux-node@$ch"
+        if systemctl is-active --quiet "cupol-reserve-node@$ch"; then
+            systemctl restart "cupol-reserve-node@$ch" || fail upgrade "не удалось перезапустить cupol-reserve-node@$ch"
             set -- "$@" "$ch"
         fi
     done
@@ -776,8 +776,8 @@ latest_release() {
 # their names.
 restart_channels() {
     for ch in $(list_channels); do
-        if systemctl is-active --quiet "openflux-node@$ch" || systemctl is-enabled --quiet "openflux-node@$ch"; then
-            systemctl restart "openflux-node@$ch" >/dev/null 2>&1
+        if systemctl is-active --quiet "cupol-reserve-node@$ch" || systemctl is-enabled --quiet "cupol-reserve-node@$ch"; then
+            systemctl restart "cupol-reserve-node@$ch" >/dev/null 2>&1
             printf '%s\n' "$ch"
         fi
     done
@@ -788,16 +788,16 @@ restart_channels() {
 channels_stay_up() {
     sleep 3
     pids=""
-    for ch in "$@"; do pids="$pids $ch=$(main_pid "openflux-node@$ch")"; done
+    for ch in "$@"; do pids="$pids $ch=$(main_pid "cupol-reserve-node@$ch")"; done
     sleep 20
     for pair in $pids; do
         ch=${pair%%=*}; pid=${pair#*=}
-        systemctl is-active --quiet "openflux-node@$ch" || return 1
-        [ -n "$pid" ] && [ "$pid" != 0 ] && [ "$pid" = "$(main_pid "openflux-node@$ch")" ] || return 1
+        systemctl is-active --quiet "cupol-reserve-node@$ch" || return 1
+        [ -n "$pid" ] && [ "$pid" != 0 ] && [ "$pid" = "$(main_pid "cupol-reserve-node@$ch")" ] || return 1
     done
 }
 
-# update: what openflux-node-update.timer runs. When RELEASE_REPO has a
+# update: what cupol-reserve-node-update.timer runs. When RELEASE_REPO has a
 # node-v* release newer than the installed core, moves every channel to it:
 # the release's own node-install.sh (at its tag) pins the core's SHA-256,
 # and the release's SHA256SUMS must say the same. If a channel does not stay
@@ -813,7 +813,7 @@ cmd_update() {
     [ -n "$arch" ] || fail update "архитектура $(uname -m) не поддерживается"
     repo=$(release_repo)
     current=$(managed_core "$repo")
-    work=$(mktemp -d /tmp/openflux-node-update.XXXXXX) || fail update "не удалось создать временную папку"
+    work=$(mktemp -d /tmp/cupol-reserve-node-update.XXXXXX) || fail update "не удалось создать временную папку"
     trap 'rm -rf "$work"' EXIT
     fetch "$GITHUB_API/repos/$repo/releases?per_page=30" "$work/releases.json" \
         || fail update "GitHub не ответил на список релизов $repo"
@@ -843,7 +843,7 @@ cmd_update() {
     [ "$(sha256_of "$work/core")" = "$want" ] || fail update "SHA-256 скачанного ядра $latest не совпал"
 
     new="openflux-$latest"
-    mkdir -p "$BIN_DIR" && chmod 0755 /opt/openflux-node "$BIN_DIR"
+    mkdir -p "$BIN_DIR" && chmod 0755 /opt/cupol-reserve-node "$BIN_DIR"
     cp "$work/core" "$BIN_DIR/.$new.new" && chmod 0755 "$BIN_DIR/.$new.new" && mv -f "$BIN_DIR/.$new.new" "$BIN_DIR/$new" \
         || fail update "не удалось записать ядро в $BIN_DIR"
     prev=$(readlink "$BIN_DIR/openflux" 2>/dev/null)
@@ -875,12 +875,12 @@ cmd_autoupdate() {
     [ "$(id -u)" = 0 ] || fail autoupdate "нужны права root (sudo)"
     case "${1:-}" in
         on)
-            [ -n "$(list_channels)" ] || fail autoupdate "на сервере нет каналов OpenFlux"
+            [ -n "$(list_channels)" ] || fail autoupdate "на сервере нет каналов CUPOL Reserve"
             AUTOUPDATE=yes ;;
         off) AUTOUPDATE=no ;;
         *) fail usage "usage: node-install.sh autoupdate on|off" ;;
     esac
-    apply_autoupdate || fail autoupdate "не удалось включить openflux-node-update.timer"
+    apply_autoupdate || fail autoupdate "не удалось включить cupol-reserve-node-update.timer"
     state=false
     autoupdate_on && state=true
     printf '{"ok":true,"autoupdate":%s}\n' "$state"
@@ -890,7 +890,7 @@ cmd_status() {
     read_config
     check_channel
     [ -d "$CONF_ROOT/$CHANNEL" ] || fail status "канала $CHANNEL нет на сервере"
-    state=$(systemctl is-active "openflux-node@$CHANNEL" 2>/dev/null)
+    state=$(systemctl is-active "cupol-reserve-node@$CHANNEL" 2>/dev/null)
     printf '{"ok":true,"channel":"%s","state":"%s"}\n' "$CHANNEL" "$(json_escape "$state")"
 }
 
