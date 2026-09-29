@@ -86,3 +86,4 @@ jobs:
         run: |
           docker exec vds sh -c 'journalctl --no-pager -n 200 -u "openflux-node*" ; systemctl list-units --all "openflux*" --no-pager' || true
           docker exec vds sh -c 'journalctl --no-pager -n 60 -u sshd -u ssh; ls -l /etc/pam.d' || true
+          docker exec vds sh -c 'sshd -T | grep -Ei "^(permitrootlogin|passwordauthentication|usepam|kbdinteractive|authenticationmethods)"; head -n 5 /etc/ssh/sshd_config; ls -la /etc/ssh/sshd_config.d; cut -c1-16 /etc/shadow | grep -E "^(root|deploy):"; ls -l /etc/shadow; cat /etc/pam.d/sshd /etc/pam.d/password-auth; authselect current' || true
