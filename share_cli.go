@@ -1,3 +1,4 @@
+// CUPOL Reserve branding modified by TOKEN PAY LLC on 2026-09-30.
 package main
 
 import (
@@ -22,7 +23,7 @@ type roomLister interface {
 // and cupsonline carrying the rooms its running transport (in rooms, by
 // spec name) entered. It also returns the transports left out and why.
 func shareConfig(specs []transportSpec, session bool, codec, secret, context, host string, rooms map[string]roomLister) (share.Config, []string) {
-	name := "OpenFlux"
+	name := "CUPOL Reserve"
 	if h, err := os.Hostname(); err == nil && h != "" {
 		name += " " + h
 	}

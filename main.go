@@ -1,3 +1,4 @@
+// CUPOL Reserve branding modified by TOKEN PAY LLC on 2026-09-30.
 package main
 
 import (
@@ -250,12 +251,12 @@ func main() {
 	// usage message with axes, modifiers, and examples instead of a flat
 	// alphabetical list.
 	flag.Usage = func() {
-		fmt.Fprintf(os.Stderr, `OpenFlux — Network stack research tool. TCP tunnel with pluggable transports.
+		fmt.Fprintf(os.Stderr, `CUPOL Reserve — OpenFlux-compatible tunnel with pluggable transports.
 
 USAGE
-  openflux --role=<role> --transport=<type> [OPTIONS]
-  openflux --role=<role> --transports=<list> [OPTIONS]
-  openflux --config=/path/to/openflux.conf [OPTIONS]
+  cupol-reserve --role=<role> --transport=<type> [OPTIONS]
+  cupol-reserve --role=<role> --transports=<list> [OPTIONS]
+  cupol-reserve --config=/path/to/reserve.conf [OPTIONS]
 
 ROLE
   -r, --role=client       Run as client. (default)
@@ -549,7 +550,7 @@ DEPRECATED (removed in v2)
 	}
 	utils.Debugf("[INIT] debug level=%d sensitive=%v", utils.Level(), utils.Sensitive())
 
-	log.Printf("=== OpenFlux ===")
+	log.Printf("=== CUPOL Reserve (OpenFlux fork) ===")
 	log.Printf("Role: %s", *role)
 	// A .conf's [Transport ...] sections or --transports run a Session of
 	// several carriers; *transportType stays at its flag default ("yandex")

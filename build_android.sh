@@ -1,9 +1,10 @@
 #!/bin/bash
+# CUPOL Reserve executable name modified by TOKEN PAY LLC on 2026-09-30.
 set -e
 
 ANDROID_NDK_HOME="${ANDROID_NDK_HOME:-$HOME/Android/Sdk/ndk/27.0.12077973}"
 OUTPUT_DIR="output/android/arm64-v8a"
-BINARY_NAME="openflux"
+BINARY_NAME="cupol-reserve"
 
 mkdir -p "$OUTPUT_DIR"
 

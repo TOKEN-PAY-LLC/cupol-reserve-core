@@ -1,4 +1,11 @@
-# OpenFlux
+# CUPOL Reserve Core
+
+This is a branded fork of [OpenFlux](https://github.com/p1neappleXpress/OpenFlux),
+modified by TOKEN PAY LLC on 2026-09-30.
+The original authors retain their copyright. The protocol and `openflux://`
+links remain compatible with upstream; the product name and executable name
+are **CUPOL Reserve**. This fork remains under GPL-3.0. It is maintained
+separately from the proprietary CUPOL VPN application.
 
 **English** | [Русский](README.ru.md)
 
