@@ -6,6 +6,10 @@
 # Passwords: root "rootpass", deploy "deploypass".
 set -eu
 base=$1
+# Hashes made here: chpasswd on RHEL-likes goes through PAM, which a stock
+# image leaves unable to check the password afterwards.
+root_hash=$(openssl passwd -6 rootpass)
+deploy_hash=$(openssl passwd -6 deploypass)
 cat <<DOCKERFILE
 FROM $base
 ENV container=docker
@@ -31,8 +35,8 @@ RUN set -eu; \\
         sed -i -e 's/^Defaults targetpw/# &/' -e 's/^ALL[[:space:]]*ALL=(ALL) ALL/# &/' /etc/sudoers; \\
     else echo "unknown package manager" >&2; exit 1; fi; \\
     echo "%\$admin ALL=(ALL) ALL" > /etc/sudoers.d/90-test; chmod 0440 /etc/sudoers.d/90-test; \\
-    echo root:rootpass | chpasswd; \\
-    useradd -m -s /bin/sh deploy; usermod -aG "\$admin" deploy; echo deploy:deploypass | chpasswd; \\
+    usermod -p '$root_hash' root; \\
+    useradd -m -s /bin/sh deploy; usermod -aG "\$admin" deploy; usermod -p '$deploy_hash' deploy; \\
     ssh-keygen -A; \\
     sed -i '1i PermitRootLogin yes\\nPasswordAuthentication yes\\nUsePAM yes' /etc/ssh/sshd_config; \\
     rm -f /etc/ssh/sshd_config.d/*.conf 2>/dev/null || true; \\

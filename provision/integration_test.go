@@ -296,7 +296,7 @@ func TestInstallOnVDS(t *testing.T) {
 	if out := sudo("sh /opt/openflux-node/node-install.sh remove first"); !strings.Contains(out, `"ok":true`) {
 		t.Fatalf("remove by name: %s", out)
 	}
-	if out := sudo("test -e /etc/openflux-node/first && echo left; systemctl is-active openflux-node@first; systemctl is-active openflux-node@second"); out != "inactive\nactive" {
+	if out := sudo(`sh -c 'test -e /etc/openflux-node/first && echo left; systemctl is-active openflux-node@first; systemctl is-active openflux-node@second'`); out != "inactive\nactive" {
 		t.Fatalf("after remove first: %q", out)
 	}
 	if out := sudo("sh /opt/openflux-node/node-install.sh remove nosuch"); !strings.Contains(out, `"ok":false`) {
@@ -305,9 +305,10 @@ func TestInstallOnVDS(t *testing.T) {
 	if out := sudo("sh /opt/openflux-node/node-install.sh uninstall"); !strings.Contains(out, `"removed":["second"]`) {
 		t.Fatalf("uninstall: %s", out)
 	}
-	left := sudo("for p in /opt/openflux-node /etc/openflux-node /var/lib/openflux-node /etc/systemd/system/openflux-node@.service " +
-		"/etc/systemd/system/openflux-node-update.timer /etc/systemd/system/openflux-node-update.service; do test -e $p && echo $p; done; " +
-		"id openflux-node >/dev/null 2>&1 && echo user; systemctl is-active openflux-node@second; ps -eo args | grep -c '[o]penflux --config'")
+	// sudo runs one command: the check is a script for sh.
+	left := sudo(`sh -c 'for p in /opt/openflux-node /etc/openflux-node /var/lib/openflux-node /etc/systemd/system/openflux-node@.service ` +
+		`/etc/systemd/system/openflux-node-update.timer /etc/systemd/system/openflux-node-update.service; do test -e $p && echo $p; done; ` +
+		`id openflux-node >/dev/null 2>&1 && echo user; systemctl is-active openflux-node@second; ps -eo args | grep -c "[o]penflux --config"'`)
 	if left != "inactive\n0" {
 		t.Fatalf("left after uninstall: %q", left)
 	}
