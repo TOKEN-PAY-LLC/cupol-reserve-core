@@ -15,8 +15,9 @@ RUN set -eu; \\
         apt-get install -y --no-install-recommends systemd systemd-sysv dbus openssh-server sudo curl ca-certificates iproute2 procps passwd; \\
         admin=sudo; \\
     elif command -v dnf >/dev/null; then \\
-        dnf install -y systemd openssh-server sudo iproute procps-ng passwd shadow-utils findutils which; \\
+        dnf install -y systemd openssh-server sudo iproute procps-ng passwd shadow-utils findutils which authselect; \\
         command -v curl >/dev/null || dnf install -y curl; \\
+        authselect select minimal --force >/dev/null 2>&1 || authselect select local --force; \\
         admin=wheel; \\
     elif command -v yum >/dev/null; then \\
         yum install -y systemd openssh-server sudo curl iproute procps-ng passwd shadow-utils which; \\

@@ -29,8 +29,8 @@ jobs:
           - ubuntu:24.04
           - ubuntu:22.04
           - ubuntu:20.04
+          - debian:13
           - debian:12
-          - debian:11
           - rockylinux/rockylinux:9
           - almalinux:8
           - fedora:42
@@ -85,3 +85,4 @@ jobs:
         if: failure()
         run: |
           docker exec vds sh -c 'journalctl --no-pager -n 200 -u "openflux-node*" ; systemctl list-units --all "openflux*" --no-pager' || true
+          docker exec vds sh -c 'journalctl --no-pager -n 60 -u sshd -u ssh; ls -l /etc/pam.d' || true

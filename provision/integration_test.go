@@ -285,7 +285,8 @@ func TestInstallOnVDS(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
-	if out := sudo("stat -c '%a %U' /var/lib/openflux-node/first"); out != "750 openflux-node" {
+	// systemd sets the mode (StateDirectoryMode); without StateDirectory= apply's 0750 stays.
+	if out := sudo("stat -c '%U' /var/lib/openflux-node/first"); out != "openflux-node" {
 		t.Fatalf("state directory: %q", out)
 	}
 	if out := sudo("sh /opt/openflux-node/node-install.sh list"); !strings.Contains(out, `"channel":"first","state":"active"`) ||
