@@ -74,7 +74,7 @@ func TestInstallOnVDS(t *testing.T) {
 		good = Pinned()
 	}
 
-	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Minute)
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 	defer cancel()
 
 	root := Target{Host: host, Port: port, User: "root", Password: os.Getenv("OPENFLUX_TEST_ROOT_PASSWORD")}
@@ -289,6 +289,46 @@ func TestInstallOnVDS(t *testing.T) {
 	}
 	if out, _, _ := c.run("test -e /etc/systemd/system/openflux-node-update.timer && echo left", nil); strings.TrimSpace(string(out)) != "" {
 		t.Fatal("updater left after the last channel was removed")
+	}
+
+	// By hand on the server: list, remove one channel by name, uninstall.
+	if err := c.FetchScript(good); err != nil {
+		t.Fatal(err)
+	}
+	for _, name := range []string{"first", "second"} {
+		p, err := c.Plan(Channel{ID: name, AutoUpdate: true}, false)
+		if err != nil {
+			t.Fatal(err)
+		}
+		k, _ := NewKey()
+		if err := c.Apply(Channel{ID: name, Key: k, Port: p.Port, AutoUpdate: true}, userPass); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if out := sudo("stat -c '%a %U' /var/lib/openflux-node/first"); out != "750 openflux-node" {
+		t.Fatalf("state directory: %q", out)
+	}
+	if out := sudo("sh /opt/openflux-node/node-install.sh list"); !strings.Contains(out, `"channel":"first","state":"active"`) ||
+		!strings.Contains(out, `"channel":"second","state":"active"`) || !strings.Contains(out, `"autoupdate":true`) {
+		t.Fatalf("list: %s", out)
+	}
+	if out := sudo("sh /opt/openflux-node/node-install.sh remove first"); !strings.Contains(out, `"ok":true`) {
+		t.Fatalf("remove by name: %s", out)
+	}
+	if out := sudo("test -e /etc/openflux-node/first && echo left; systemctl is-active openflux-node@first; systemctl is-active openflux-node@second"); out != "inactive\nactive" {
+		t.Fatalf("after remove first: %q", out)
+	}
+	if out := sudo("sh /opt/openflux-node/node-install.sh remove nosuch"); !strings.Contains(out, `"ok":false`) {
+		t.Fatalf("remove of a missing channel: %s", out)
+	}
+	if out := sudo("sh /opt/openflux-node/node-install.sh uninstall"); !strings.Contains(out, `"removed":["second"]`) {
+		t.Fatalf("uninstall: %s", out)
+	}
+	left := sudo("for p in /opt/openflux-node /etc/openflux-node /var/lib/openflux-node /etc/systemd/system/openflux-node@.service " +
+		"/etc/systemd/system/openflux-node-update.timer /etc/systemd/system/openflux-node-update.service; do test -e $p && echo $p; done; " +
+		"id openflux-node >/dev/null 2>&1 && echo user; systemctl is-active openflux-node@second; ps -eo args | grep -c '[o]penflux --config'")
+	if left != "inactive\n0" {
+		t.Fatalf("left after uninstall: %q", left)
 	}
 }
 
