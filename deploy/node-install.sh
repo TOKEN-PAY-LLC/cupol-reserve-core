@@ -31,19 +31,14 @@
 #                                                 script installed)
 #        node-install.sh upgrade                  (run as root: move every
 #                                                 channel to this core)
-#        node-install.sh set-cookies CONFIG_FILE  (run as root: replace a
-#                                                 channel's Yandex login)
 #        node-install.sh update                   (run as root, by the timer:
 #                                                 move every channel to the
 #                                                 newest node-v* release)
 #        node-install.sh autoupdate on|off        (run as root: the updater)
 # The config is "key=value" lines: channel, key, port, the transports
 # (vyandex= or its old name url=: a Yandex document; mailru=: a Mail.ru
-# public document; cupsonline=: the packed room list), autoupdate=yes|no,
-# and optionally cookies: the channel's Yandex sign-in as the core's cookie store JSON,
-# base64-encoded. It goes to /var/lib/openflux-node/<channel>/cookies.json
-# (0600, owned by the node user) and is never printed. apply and remove
-# take it from a 0600 temp file, which they delete after reading, so that
+# public document; cupsonline=: the packed room list) and autoupdate=yes|no.
+# apply and remove take it from a 0600 temp file, which they delete after reading, so that
 # stdin stays free for `sudo -S` (a wrong sudo password would otherwise make
 # sudo read the config as further password attempts). Secrets never appear
 # in arguments, so they stay out of ps and shell history.
@@ -261,7 +256,7 @@ pick_port() {
 
 # ---- input ------------------------------------------------------------------
 
-CHANNEL=""; URL=""; MAILRU=""; CUPS=""; KEY=""; PORT=""; COOKIES=""; AUTOUPDATE=""
+CHANNEL=""; URL=""; MAILRU=""; CUPS=""; KEY=""; PORT=""; AUTOUPDATE=""
 
 # read_config [FILE]: reads stdin, or FILE and then deletes it.
 read_config() {
@@ -280,7 +275,6 @@ read_config() {
             cupsonline=*) CUPS=${line#cupsonline=} ;;
             key=*) KEY=${line#key=} ;;
             port=*) PORT=${line#port=} ;;
-            cookies=*) COOKIES=${line#cookies=} ;;
             autoupdate=*) AUTOUPDATE=${line#autoupdate=} ;;
             "") ;;
             *) fail input "неизвестная строка конфигурации" ;;
@@ -307,7 +301,6 @@ check_transports() {
     [ -z "$URL" ] || valid_url "$URL" || fail input "адрес документа должен быть вида https://docs.yandex.ru/edit/d/..."
     [ -z "$MAILRU" ] || valid_mailru "$MAILRU" || fail input "ссылка Mail.ru должна быть вида https://cloud.mail.ru/public/..."
     [ -z "$CUPS" ] || valid_rooms "$CUPS" || fail input "неверный список комнат cups.online"
-    [ -z "$COOKIES" ] || [ -n "$URL" ] || fail input "вход в Яндекс нужен только каналу с документом Яндекса"
     case "$AUTOUPDATE" in ""|yes|no) ;; *) fail input "autoupdate: yes или no" ;; esac
 }
 
@@ -325,26 +318,6 @@ transport_names() {
 # aside. "" leaves node.conf without a URL line (the core's "http://#").
 session_context() {
     if [ -n "$URL" ]; then printf '%s' "$URL"; elif [ -n "$MAILRU" ]; then printf '%s' "$MAILRU"; fi
-}
-
-# write_cookies: decodes COOKIES into the channel's cookie store, which the
-# node loads at start. Needs the node user to exist.
-write_cookies() {
-    printf '%s' "$COOKIES" | grep -Eq '^[A-Za-z0-9+/]+={0,2}$' || return 1
-    [ ${#COOKIES} -le 65536 ] || return 1
-    dir="$STATE_ROOT/$CHANNEL"
-    # umask 077 would make the parent 0700 and lock the node user out of
-    # its own state directory (systemd only creates it when missing).
-    mkdir -p "$STATE_ROOT" && chmod 0755 "$STATE_ROOT" || return 1
-    mkdir -p "$dir" || return 1
-    tmp="$dir/.cookies.json.new"
-    if have base64; then
-        printf '%s' "$COOKIES" | base64 -d > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
-    else
-        printf '%s' "$COOKIES" | openssl base64 -d -A > "$tmp" 2>/dev/null || { rm -f "$tmp"; return 1; }
-    fi
-    head -c 1 "$tmp" | grep -q '{' || { rm -f "$tmp"; return 1; }
-    chown "$NODE_USER:$NODE_USER" "$dir" "$tmp" && chmod 0600 "$tmp" && mv -f "$tmp" "$dir/cookies.json"
 }
 
 check_channel() {
@@ -400,7 +373,6 @@ cmd_plan() {
         set -- "$@" "Скачать ядро OpenFlux $core (linux-$arch) из релизов $RELEASE_REPO на GitHub и сверить SHA-256 в $BIN_DIR"
     fi
     set -- "$@" "Создать $CONF_ROOT/$CHANNEL: node.conf и ключ шифрования канала (права 0640)"
-    [ -n "$COOKIES" ] && set -- "$@" "Сохранить вход в Яндекс для этого канала в $STATE_ROOT/$CHANNEL/cookies.json (права 0600, только для ноды)"
     [ -f "$UNIT_FILE" ] || set -- "$@" "Установить шаблон systemd $UNIT_FILE"
     names=$(transport_names)
     if [ -n "$names" ]; then
@@ -610,7 +582,6 @@ cmd_apply() {
     valid_key "$KEY" || fail input "ключ канала должен быть 64 hex-символа"
     check_transports
     valid_port "$PORT" || fail input "не указан порт из плана"
-    [ -z "$COOKIES" ] || printf '%s' "$COOKIES" | grep -Eq '^[A-Za-z0-9+/]+={0,2}$' || fail input "cookies должны быть в base64"
     arch=$(detect_arch)
     [ -n "$arch" ] || fail apply "архитектура $(uname -m) не поддерживается"
     [ -d "$CONF_ROOT/$CHANNEL" ] && fail apply "канал $CHANNEL уже существует на сервере"
@@ -649,9 +620,6 @@ cmd_apply() {
     # The node's state directory (systemd before 235 does not make it).
     mkdir -p "$STATE_ROOT/$CHANNEL" && chmod 0755 "$STATE_ROOT" && chown "$NODE_USER:$NODE_USER" "$STATE_ROOT/$CHANNEL" \
         && chmod 0750 "$STATE_ROOT/$CHANNEL" || apply_fail config "не удалось создать $STATE_ROOT/$CHANNEL"
-    if [ -n "$COOKIES" ]; then
-        write_cookies || apply_fail cookies "не удалось сохранить вход в Яндекс на сервере"
-    fi
 
     if [ ! -f "$UNIT_FILE" ]; then
         write_unit
@@ -901,18 +869,6 @@ cmd_update() {
         "$latest" "$(json_escape "${prev#openflux-}")" "$(json_list "$@")"
 }
 
-# set-cookies: replaces a channel's Yandex sign-in and restarts it.
-cmd_set_cookies() {
-    [ "$(id -u)" = 0 ] || fail set-cookies "нужны права root (sudo)"
-    read_config "$@"
-    check_channel
-    [ -d "$CONF_ROOT/$CHANNEL" ] || fail set-cookies "канала $CHANNEL нет на сервере"
-    [ -n "$COOKIES" ] || fail set-cookies "нет cookies"
-    write_cookies || fail set-cookies "не удалось сохранить вход в Яндекс на сервере"
-    systemctl restart "openflux-node@$CHANNEL" || fail set-cookies "не удалось перезапустить openflux-node@$CHANNEL"
-    printf '{"ok":true,"channel":"%s"}\n' "$CHANNEL"
-}
-
 # autoupdate on|off: turns the core updater on or off for the whole server,
 # e.g. on channels installed before the wizard offered it.
 cmd_autoupdate() {
@@ -947,8 +903,7 @@ case "${1:-}" in
     list) cmd_list ;;
     status) cmd_status ;;
     upgrade) cmd_upgrade ;;
-    set-cookies) shift; cmd_set_cookies "$@" ;;
     update) cmd_update ;;
     autoupdate) shift; cmd_autoupdate "$@" ;;
-    *) fail usage "usage: node-install.sh probe|plan|apply|remove|list|uninstall|status|upgrade|set-cookies|update|autoupdate" ;;
+    *) fail usage "usage: node-install.sh probe|plan|apply|remove|list|uninstall|status|upgrade|update|autoupdate" ;;
 esac
