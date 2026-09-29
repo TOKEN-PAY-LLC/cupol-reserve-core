@@ -37,6 +37,9 @@ RUN set -eu; \\
     echo "%\$admin ALL=(ALL) ALL" > /etc/sudoers.d/90-test; chmod 0440 /etc/sudoers.d/90-test; \\
     usermod -p '$root_hash' root; \\
     useradd -m -s /bin/sh deploy; usermod -aG "\$admin" deploy; usermod -p '$deploy_hash' deploy; \\
+    # RHEL-likes ship /etc/shadow 0000, readable only with CAP_DAC_OVERRIDE,
+    # which sshd lacks in the container: pam_unix could not check a password.
+    chmod 0600 /etc/shadow /etc/gshadow 2>/dev/null || true; \\
     ssh-keygen -A; \\
     sed -i '1i PermitRootLogin yes\\nPasswordAuthentication yes\\nUsePAM yes' /etc/ssh/sshd_config; \\
     rm -f /etc/ssh/sshd_config.d/*.conf 2>/dev/null || true; \\
