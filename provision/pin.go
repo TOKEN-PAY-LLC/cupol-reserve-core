@@ -5,9 +5,9 @@ package provision
 // keeps the hash in step with deploy/node-install.sh; when the script
 // changes, commit it, then point PinnedCommit at that commit.
 const (
-	PinnedRepo   = "p1neappleXpress/OpenFlux"
-	PinnedCommit = "8da36d909dec43733c743f9761030bec24f0f780"
-	PinnedSHA256 = "ad6501beb42baab257b4d7e5d3d7c5dc21153c73c5d2263ef49edc9a60553c17"
+	PinnedRepo   = "TOKEN-PAY-LLC/cupol-reserve-core"
+	PinnedCommit = "d11d1004c55747c6624b61ddad0dc0688f4f34b5"
+	PinnedSHA256 = "5246ac4c76c293f642e9fb1830e6ecf9ddbd11c0bb0fa397a565505273e8cd90"
 )
 
 // Pinned returns the script location for this build.
