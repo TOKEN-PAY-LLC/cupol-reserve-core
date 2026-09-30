@@ -64,6 +64,14 @@ type TCPTunnel struct {
 	stopOnce    sync.Once
 	stopCh      chan struct{}
 	udpFlows    atomic.Int32
+	remoteDNS   string
+	dnsMu       sync.Mutex
+	dnsCache    map[string]cachedIPv4
+}
+
+type cachedIPv4 struct {
+	ip      net.IP
+	expires time.Time
 }
 
 var (
@@ -94,6 +102,7 @@ func NewTCPTunnelMode(trans transport.Transport, isExitNode bool, mode ExitMode)
 		exitMode:   mode,
 		startTime:  time.Now(),
 		stopCh:     make(chan struct{}),
+		dnsCache:   make(map[string]cachedIPv4),
 	}
 
 	utils.Debugf("[TUNNEL] Net stack init...")
@@ -143,6 +152,18 @@ func NewTCPTunnelMode(trans transport.Transport, isExitNode bool, mode ExitMode)
 
 	utils.SafeGo("tunnel.printStats", t.printStats)
 	return t
+}
+
+// UseRemoteDNS resolves SOCKS hostnames through the encrypted transport.
+// Call before accepting proxy connections. The server must be an IP literal.
+func (t *TCPTunnel) UseRemoteDNS(server string) error {
+	host, port, err := net.SplitHostPort(server)
+	portNumber, portErr := strconv.Atoi(port)
+	if err != nil || net.ParseIP(host).To4() == nil || portErr != nil || portNumber < 1 || portNumber > 65535 {
+		return fmt.Errorf("remote DNS must be an IP address with a port")
+	}
+	t.remoteDNS = server
+	return nil
 }
 
 func (t *TCPTunnel) setupExitNodeProxy(tunnelNIC tcpip.NICID) {
@@ -325,6 +346,37 @@ func (t *TCPTunnel) resolveIPv4(host string) (net.IP, error) {
 		}
 		return nil, fmt.Errorf("IPv6 not supported")
 	}
+	if t.remoteDNS != "" {
+		t.dnsMu.Lock()
+		cached, ok := t.dnsCache[host]
+		t.dnsMu.Unlock()
+		if ok && time.Now().Before(cached.expires) {
+			return append(net.IP(nil), cached.ip...), nil
+		}
+		ctx, cancel := context.WithTimeout(context.Background(), dialTimeout)
+		defer cancel()
+		resolver := net.Resolver{PreferGo: true, Dial: func(_ context.Context, network, _ string) (net.Conn, error) {
+			if network == "tcp" || network == "tcp4" {
+				return t.DialTCP(t.remoteDNS)
+			}
+			return t.DialUDP(t.remoteDNS)
+		}}
+		ips, err := resolver.LookupIP(ctx, "ip4", host)
+		if err != nil {
+			return nil, fmt.Errorf("resolve through tunnel: %w", err)
+		}
+		if len(ips) == 0 {
+			return nil, fmt.Errorf("IPv4 address not found through tunnel")
+		}
+		ip4 := ips[0].To4()
+		if ip4 == nil {
+			return nil, fmt.Errorf("IPv4 address not found")
+		}
+		t.dnsMu.Lock()
+		t.dnsCache[host] = cachedIPv4{ip: append(net.IP(nil), ip4...), expires: time.Now().Add(time.Minute)}
+		t.dnsMu.Unlock()
+		return ip4, nil
+	}
 
 	tcpAddr, err := net.ResolveTCPAddr("tcp", net.JoinHostPort(host, "0"))
 	if err != nil {
@@ -338,18 +390,22 @@ func (t *TCPTunnel) resolveIPv4(host string) (net.IP, error) {
 }
 
 func (t *TCPTunnel) DialUDP(address string) (net.Conn, error) {
-	udpAddr, err := net.ResolveUDPAddr("udp", address)
+	host, portText, err := net.SplitHostPort(address)
 	if err != nil {
-		return nil, fmt.Errorf("resolve UDP: %w", err)
+		return nil, fmt.Errorf("split UDP address: %w", err)
 	}
-	ip := udpAddr.IP.To4()
-	if ip == nil {
-		return nil, fmt.Errorf("IPv6 not supported")
+	port, err := strconv.Atoi(portText)
+	if err != nil || port < 0 || port > 65535 {
+		return nil, fmt.Errorf("bad UDP port")
+	}
+	ip, err := t.resolveIPv4(host)
+	if err != nil {
+		return nil, err
 	}
 	remote := &tcpip.FullAddress{
 		NIC:  1,
 		Addr: tcpip.AddrFrom4([4]byte{ip[0], ip[1], ip[2], ip[3]}),
-		Port: uint16(udpAddr.Port),
+		Port: uint16(port),
 	}
 	return gonet.DialUDP(t.gvisorStack, nil, remote, ipv4.ProtocolNumber)
 }

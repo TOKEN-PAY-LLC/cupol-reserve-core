@@ -81,6 +81,13 @@ func startProxyWith(build func() (transport.Transport, error), listenAddr, usern
 	}
 
 	tun := tunnel.NewTCPTunnel(trans, false)
+	if err := tun.UseRemoteDNS("1.1.1.1:53"); err != nil {
+		tun.Close()
+		_ = trans.Stop()
+		detachCaptcha()
+		setAuthProxy(nil)
+		return err.Error()
+	}
 	var dialer socks5.Dialer = tun
 	if strings.TrimSpace(bypassDomains) != "" {
 		dialer = newSplitDialer(tun, strings.Split(bypassDomains, "\n"))
