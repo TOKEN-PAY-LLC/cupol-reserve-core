@@ -373,6 +373,19 @@ func (t *TCPTunnel) resolveIPv4(host string) (net.IP, error) {
 			return nil, fmt.Errorf("IPv4 address not found")
 		}
 		t.dnsMu.Lock()
+		if len(t.dnsCache) >= 256 {
+			for name, entry := range t.dnsCache {
+				if time.Now().After(entry.expires) {
+					delete(t.dnsCache, name)
+				}
+			}
+			if len(t.dnsCache) >= 256 {
+				for name := range t.dnsCache {
+					delete(t.dnsCache, name)
+					break
+				}
+			}
+		}
 		t.dnsCache[host] = cachedIPv4{ip: append(net.IP(nil), ip4...), expires: time.Now().Add(time.Minute)}
 		t.dnsMu.Unlock()
 		return ip4, nil
