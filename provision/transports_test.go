@@ -36,6 +36,24 @@ func TestCheckTransportsCleansAndOrders(t *testing.T) {
 	}
 }
 
+func TestCheckTransportsAccepts360Editor(t *testing.T) {
+	for _, host := range []string{"docs.360.yandex.com", "disk.360.yandex.com"} {
+		url := "https://" + host + "/edit/d/AbCdEfGhIjKlMnOpQrStUv"
+		got, err := CheckTransports([]ChannelTransport{{Type: "vyandex", URL: " " + url + "/?source=docs#section "}})
+		if err != nil || len(got) != 1 || got[0].URL != url {
+			t.Fatalf("360 editor: got %+v, error %v", got, err)
+		}
+	}
+}
+
+func TestCheckTransportsRejectsLookalikeEditors(t *testing.T) {
+	for _, host := range []string{"docs.360.yandex.com.evil.example", "docs.360.yandex.ru", "evil.yandex.com", "docs.yandex.com@evil.example"} {
+		if _, err := CheckTransports([]ChannelTransport{{"vyandex", "https://" + host + "/edit/d/AbCdEfGhIjKlMnOpQrStUv"}}); err == nil {
+			t.Errorf("accepted lookalike host %s", host)
+		}
+	}
+}
+
 func TestCheckTransportsRefuses(t *testing.T) {
 	for name, ts := range map[string][]ChannelTransport{
 		"twice":        {{"vyandex", testVolga}, {"vyandex", testVolga}},

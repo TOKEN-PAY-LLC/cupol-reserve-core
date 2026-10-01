@@ -30,7 +30,7 @@ var transportPriority = map[string]int{"vyandex": 100, "mailru": 90, "cupsonline
 const directPriority = 110
 
 var (
-	volgaDocURL  = regexp.MustCompile(`^https://(docs|disk)\.yandex\.(ru|com|by|kz|uz)/edit/d/[A-Za-z0-9_-]{16,200}$`)
+	volgaDocURL  = regexp.MustCompile(`^https://((docs|disk)\.yandex\.(ru|com|by|kz|uz)|(docs|disk)\.360\.yandex\.com)/edit/d/[A-Za-z0-9_-]{16,200}$`)
 	mailruDocURL = regexp.MustCompile(`^https://cloud\.mail\.ru/public/[A-Za-z0-9_-]{2,64}/[A-Za-z0-9_-]{2,128}$`)
 	cupsRoomList = regexp.MustCompile(`^[A-Za-z0-9_-]{8,}$`)
 )
