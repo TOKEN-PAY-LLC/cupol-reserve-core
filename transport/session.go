@@ -23,6 +23,7 @@ type Session struct {
 	remote           PeerParameters
 	exit             bool
 	ready            bool
+	peerConfirmed    bool // client: exit confirmed its acceptance of this session
 	started          bool
 	stopped          bool
 	sequence         uint64
@@ -551,7 +552,7 @@ func (s *Session) helloLoop() {
 	var lastSent time.Time
 	for {
 		s.mu.Lock()
-		ready := s.ready
+		ready := s.establishedLocked()
 		pace := s.helloInterval
 		if time.Since(started) > helloBackoff {
 			pace = max(pace, helloSlow)
@@ -646,6 +647,7 @@ func (s *Session) peerSilentLocked() bool {
 
 func (s *Session) resetLocked() {
 	s.ready = false
+	s.peerConfirmed = false
 	s.peer = [32]byte{}
 	s.remote = PeerParameters{}
 	s.sequence, s.highest, s.window = 0, 0, replayWindow{}
@@ -715,7 +717,7 @@ func (l *transportLink) stop() {
 
 func (s *Session) IsConnected() bool {
 	s.mu.Lock()
-	ready := s.ready && !s.stopped
+	ready := s.establishedLocked() && !s.stopped
 	classic := s.classicConnectedLocked()
 	s.mu.Unlock()
 	if classic {
@@ -731,9 +733,18 @@ func (s *Session) IsConnected() bool {
 // carrier reaches the peer (IsConnected also counts classic mode).
 func (s *Session) handshakeDone() bool {
 	s.mu.Lock()
-	ready := s.ready && !s.stopped
+	ready := s.establishedLocked() && !s.stopped
 	s.mu.Unlock()
 	return ready && s.anyLive()
+}
+
+// establishedLocked separates a received challenge from an accepted session.
+// A replacement offer echoes the client's challenge but has Ready=0: the exit
+// still serves the previous session until it receives the fresh challenge echo.
+// Reporting it connected allows data to overtake that echo and be discarded.
+// The client's hello loop keeps retrying until the exit returns Ready=1.
+func (s *Session) establishedLocked() bool {
+	return s.ready && (s.exit || s.peerConfirmed)
 }
 
 // classicConnectedLocked: a classic-fallback client counts as connected
@@ -799,7 +810,7 @@ func (s *Session) Mode() string {
 		return ""
 	case s.exit && s.classicLink != nil && !s.sessionActiveLocked():
 		return "classic"
-	case s.ready:
+	case s.establishedLocked():
 		return "session"
 	case s.classicTargetLocked() != nil:
 		return "classic"
@@ -834,7 +845,7 @@ func (s *Session) ActiveTransport() string {
 			return l.name
 		}
 	}
-	if !s.ready || s.stopped {
+	if !s.establishedLocked() || s.stopped {
 		return ""
 	}
 	if links := s.liveLinksLocked(); len(links) > 0 {
@@ -853,7 +864,7 @@ func (s *Session) LiveTransports() []string {
 			return []string{l.name}
 		}
 	}
-	if !s.ready || s.stopped {
+	if !s.establishedLocked() || s.stopped {
 		return nil
 	}
 	var names []string
@@ -868,7 +879,7 @@ func (s *Session) IsExit() bool { return s.exit }
 func (s *Session) PeerParameters() (PeerParameters, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	return s.remote, s.ready && !s.stopped
+	return s.remote, s.establishedLocked() && !s.stopped
 }
 
 func (s *Session) Transports() []string {
@@ -944,7 +955,7 @@ func (s *Session) Send(p []byte) error {
 			return s.sendClassic(l, p)
 		}
 	}
-	if !s.ready || s.stopped {
+	if !s.establishedLocked() || s.stopped {
 		s.mu.Unlock()
 		return ErrNegotiationPending
 	}
@@ -1270,6 +1281,9 @@ func (s *Session) receiveHello(link *transportLink, env *control.Envelope) {
 			MaxPacketSize: minInt(params.MaxPacketSize, s.params.MaxPacketSize),
 		}
 		s.ready = true
+		if env.Hello.Ready == 1 {
+			s.peerConfirmed = true
+		}
 	}
 	link.lastHeard = time.Now()
 	var names []string
@@ -1313,6 +1327,7 @@ func (s *Session) offerReplacementLocked(link *transportLink, sender [32]byte, p
 		}
 		s.sequence, s.highest, s.window = 0, 0, replayWindow{}
 		s.peerKeepalive = false
+		s.peerConfirmed = env.Hello.Ready == 1
 		s.candidate = nil
 		for _, l := range s.links {
 			l.lastHeard = time.Time{}
