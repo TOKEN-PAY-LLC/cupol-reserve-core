@@ -485,6 +485,12 @@ func TestMatrixStuckMidSession(t *testing.T) {
 			t.Run(fmt.Sprintf("%s-stuck/via-%s", st.name, relay), func(t *testing.T) {
 				t.Parallel()
 				p := startPair(t, pairOpts{types: []int{si, ri}})
+				// The first completed handshake may arrive on the lower-priority
+				// carrier while the preferred one's batch writer is still starting.
+				// Establish the healthy preferred path before testing its outage.
+				waitUntil(t, 10*time.Second, "both peers to use the healthy preferred carrier", func() bool {
+					return p.client.Session().ActiveTransport() == st.name && p.exit.Session().ActiveTransport() == st.name
+				})
 				p.roundTrip(t, 3*time.Second, "healthy")
 				if a := p.client.Session().ActiveTransport(); a != st.name {
 					t.Fatalf("healthy session routes via %q, want %q", a, st.name)
