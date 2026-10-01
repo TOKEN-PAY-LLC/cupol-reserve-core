@@ -285,7 +285,7 @@ read_config() {
 valid_channel() { printf '%s' "$1" | grep -Eq '^[a-z0-9][a-z0-9-]{0,30}$'; }
 valid_key() { printf '%s' "$1" | grep -Eq '^[0-9a-f]{64}$'; }
 valid_url() {
-    printf '%s' "$1" | grep -Eq '^https://(docs|disk)\.yandex\.(ru|com|by|kz|uz)/edit/d/[A-Za-z0-9_-]{16,200}$'
+    printf '%s' "$1" | grep -Eq '^https://((docs|disk)\.yandex\.(ru|com|by|kz|uz)|(docs|disk)\.360\.yandex\.com)/edit/d/[A-Za-z0-9_-]{16,200}$'
 }
 valid_mailru() {
     printf '%s' "$1" | grep -Eq '^https://cloud\.mail\.ru/public/[A-Za-z0-9_-]{2,64}/[A-Za-z0-9_-]{2,128}$'
