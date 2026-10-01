@@ -24,7 +24,7 @@ type proxyState struct {
 	running   bool
 	transport transport.Transport
 	tun       *tunnel.TCPTunnel
-	server    *socks5.SOCKS5Server
+	servers   []*socks5.SOCKS5Server
 }
 
 // StartProxy launches the local SOCKS5 proxy in classic single-transport
@@ -32,10 +32,11 @@ type proxyState struct {
 // has started, or a user-readable error. Call ProxyIsConnected to learn when
 // the tunnel itself is actually up. Hostname lookups are resolved locally by
 // TCPTunnel (the same as the desktop CLI client), so no exit-node changes are
-// required. When username is non-empty, the SOCKS5 server requires that
-// username/password (e.g. for a proxy bound to 0.0.0.0 and reachable from
-// the local network); an empty username leaves it open, as appropriate for a
-// loopback-only bind. bypassDomains is a newline-separated list (from the
+// required. listenAddr can also be "127.0.0.1:1080|192.168.43.1:1080":
+// the first listener remains local and the second requires username/password.
+// This avoids exposing an unauthenticated proxy to every network interface.
+// With a single address, username/password applies to that listener.
+// bypassDomains is a newline-separated list (from the
 // Android "Маршрутизация" settings tab) of domains to dial directly instead
 // of through the tunnel; pass "" for none.
 func StartProxy(transportType, documentURL, encryptionSecret, codec, maxToken, maxUid, listenAddr, username, password, bypassDomains string) string {
@@ -92,34 +93,53 @@ func startProxyWith(build func() (transport.Transport, error), listenAddr, usern
 	if strings.TrimSpace(bypassDomains) != "" {
 		dialer = newSplitDialer(tun, strings.Split(bypassDomains, "\n"))
 	}
-	server := socks5.NewSOCKS5Server(listenAddr, dialer)
-	if username != "" {
-		server.SetAuth(username, password)
-	}
-	if err := server.Bind(); err != nil {
+	addresses := strings.Split(listenAddr, "|")
+	if len(addresses) > 2 || (len(addresses) == 2 && (username == "" || password == "")) {
+		tun.Close()
 		_ = trans.Stop()
-		appendLog(fmt.Sprintf("[ERROR] Не удалось занять %s: %v", listenAddr, err))
 		detachCaptcha()
 		setAuthProxy(nil)
-		return fmt.Sprintf("Порт %s уже занят", listenAddr)
+		return "Для сетевого SOCKS5 нужен логин и пароль"
+	}
+	servers := make([]*socks5.SOCKS5Server, 0, len(addresses))
+	for i, address := range addresses {
+		server := socks5.NewSOCKS5Server(address, dialer)
+		if username != "" && (len(addresses) == 1 || i == 1) {
+			server.SetAuth(username, password)
+		}
+		if err := server.Bind(); err != nil {
+			for _, bound := range servers {
+				_ = bound.Close()
+			}
+			tun.Close()
+			_ = trans.Stop()
+			appendLog(fmt.Sprintf("[ERROR] Не удалось занять %s: %v", address, err))
+			detachCaptcha()
+			setAuthProxy(nil)
+			return fmt.Sprintf("Порт %s недоступен", address)
+		}
+		servers = append(servers, server)
 	}
 
 	proxy.mu.Lock()
 	proxy.running = true
 	proxy.transport = trans
 	proxy.tun = tun
-	proxy.server = server
+	proxy.servers = servers
 	proxy.mu.Unlock()
 
-	utils.SafeGo("mobile.proxyServe", func() {
-		err := server.Start()
-		proxy.mu.Lock()
-		stillRunning := proxy.running
-		proxy.mu.Unlock()
-		if stillRunning && err != nil {
-			appendLog(fmt.Sprintf("[ERROR] Прокси остановлен: %v", err))
-		}
-	})
+	for _, listener := range servers {
+		server := listener
+		utils.SafeGo("mobile.proxyServe", func() {
+			err := server.Start()
+			proxy.mu.Lock()
+			stillRunning := proxy.running
+			proxy.mu.Unlock()
+			if stillRunning && err != nil {
+				appendLog(fmt.Sprintf("[ERROR] Прокси остановлен: %v", err))
+			}
+		})
+	}
 
 	appendLog(fmt.Sprintf("[SUCCESS] SOCKS5-прокси слушает %s", listenAddr))
 	return ""
@@ -127,19 +147,19 @@ func startProxyWith(build func() (transport.Transport, error), listenAddr, usern
 
 func StopProxy() {
 	proxy.mu.Lock()
-	server := proxy.server
+	servers := proxy.servers
 	trans := proxy.transport
 	proxy.running = false
 	proxy.transport = nil
 	proxy.tun = nil
-	proxy.server = nil
+	proxy.servers = nil
 	proxy.mu.Unlock()
 	detachCaptcha()
 	CancelCaptcha()
 	setAuthProxy(nil)
 	clearRoute()
 	appendLog("[ANDROID] Остановка прокси-транспорта")
-	if server != nil {
+	for _, server := range servers {
 		_ = server.Close()
 	}
 	if trans != nil {
@@ -166,20 +186,22 @@ func ProxyIsConnected() bool {
 // speed indicator. Both are 0 if the proxy isn't running.
 func ProxyBytesSent() int64 {
 	proxy.mu.Lock()
-	server := proxy.server
+	servers := proxy.servers
 	proxy.mu.Unlock()
-	if server == nil {
-		return 0
+	var total int64
+	for _, server := range servers {
+		total += server.BytesSent()
 	}
-	return server.BytesSent()
+	return total
 }
 
 func ProxyBytesReceived() int64 {
 	proxy.mu.Lock()
-	server := proxy.server
+	servers := proxy.servers
 	proxy.mu.Unlock()
-	if server == nil {
-		return 0
+	var total int64
+	for _, server := range servers {
+		total += server.BytesReceived()
 	}
-	return server.BytesReceived()
+	return total
 }
